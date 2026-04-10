@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>v2 MLB Model Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --border: #2a2d37;
+    --text: #e1e4ea;
+    --muted: #8b8fa3;
+    --green: #22c55e;
+    --red: #ef4444;
+    --blue: #3b82f6;
+    --yellow: #eab308;
+    --orange: #f97316;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    padding: 16px; max-width: 1200px; margin: 0 auto;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  h2 { font-size: 1.1rem; margin-bottom: 8px; color: var(--muted); font-weight: 500; }
+  .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; text-align: center;
+  }
+  .stat-card .value { font-size: 1.6rem; font-weight: 700; }
+  .stat-card .label { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  .neutral { color: var(--yellow); }
+  .section {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  tr:hover { background: rgba(59,130,246,0.05); }
+  .bet-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 600;
+  }
+  .bet-tag.home { background: rgba(34,197,94,0.15); color: var(--green); }
+  .bet-tag.away { background: rgba(59,130,246,0.15); color: var(--blue); }
+  .bet-tag.over { background: rgba(249,115,22,0.15); color: var(--orange); }
+  .bet-tag.under { background: rgba(139,143,163,0.15); color: var(--muted); }
+  .bet-tag.nrfi { background: rgba(234,179,8,0.15); color: var(--yellow); }
+  .flag { font-size: 0.7rem; padding: 1px 5px; border-radius: 3px; }
+  .flag.ok { background: rgba(34,197,94,0.15); color: var(--green); }
+  .flag.warn { background: rgba(239,68,68,0.15); color: var(--red); }
+  .edge-bar {
+    display: inline-block; height: 6px; border-radius: 3px; min-width: 4px;
+    vertical-align: middle; margin-left: 4px;
+  }
+  .chart-container { height: 200px; margin-top: 8px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tab {
+    padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem;
+    background: var(--border); color: var(--muted); border: none;
+  }
+  .tab.active { background: var(--blue); color: white; }
+  .loading { text-align: center; padding: 40px; color: var(--muted); }
+  @media (max-width: 600px) {
+    body { padding: 8px; }
+    .grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    table { font-size: 0.75rem; }
+    td, th { padding: 4px 4px; }
+  }
+</style>
+</head>
+<body>
+
+<h1>v2 MLB Model</h1>
+<div class="subtitle" id="status-line">Loading...</div>
+
+<!-- Summary Stats -->
+<div class="grid" id="stats-grid">
+  <div class="stat-card"><div class="value" id="stat-bets">--</div><div class="label">Bets Fired</div></div>
+  <div class="stat-card"><div class="value" id="stat-clv">--</div><div class="label">Mean CLV (pp)</div></div>
+  <div class="stat-card"><div class="value" id="stat-wr">--</div><div class="label">Win Rate</div></div>
+  <div class="stat-card"><div class="value" id="stat-gate">--</div><div class="label">Gate Status</div></div>
+</div>
+
+<!-- Today's Bet Card -->
+<div class="section">
+  <h2>Today's Bet Card</h2>
+  <div class="tabs" id="market-tabs"></div>
+  <table>
+    <thead>
+      <tr><th>Game</th><th>Market</th><th>Side</th><th>Edge</th><th>Our%</th><th>Mkt%</th><th>Kelly</th></tr>
+    </thead>
+    <tbody id="bets-body"></tbody>
+  </table>
+  <div id="no-bets" style="display:none; padding:20px; text-align:center; color:var(--muted);">No bets for today.</div>
+</div>
+
+<!-- Pitcher K Props -->
+<div class="section">
+  <h2>Pitcher K Props</h2>
+  <table>
+    <thead>
+      <tr><th>Pitcher</th><th>vs</th><th>Line</th><th>Mkt</th><th>Model</th><th>Edge</th><th>Signal</th><th>Data</th></tr>
+    </thead>
+    <tbody id="props-body"></tbody>
+  </table>
+  <div id="no-props" style="display:none; padding:20px; text-align:center; color:var(--muted);">No pitcher K predictions today.</div>
+</div>
+
+<!-- Performance Chart -->
+<div class="section">
+  <h2>Rolling CLV Performance</h2>
+  <div class="chart-container"><canvas id="clv-chart"></canvas></div>
+</div>
+
+<!-- Market Breakdown -->
+<div class="section">
+  <h2>Market Performance (Season)</h2>
+  <table>
+    <thead><tr><th>Market</th><th>Bets</th><th>CLV (pp)</th><th>Win Rate</th></tr></thead>
+    <tbody id="market-body"></tbody>
+  </table>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://naaglfmoynwovqdqtflk.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5hYWdsZm1veW53b3ZxZHF0ZmxrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3OTM4NDMsImV4cCI6MjA5MTM2OTg0M30.cW67tw1UjulO9DyNHN8ejsD2K7KHdBQJ_8AVzXf2PUY';
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const today = new Date().toISOString().split('T')[0];
+
+function pct(v) { return v != null ? (v * 100).toFixed(1) + '%' : 'n/a'; }
+function pp(v) { return v != null ? (v > 0 ? '+' : '') + v.toFixed(2) : 'n/a'; }
+function edgeColor(v) { return v > 0.02 ? 'var(--green)' : v < -0.02 ? 'var(--red)' : 'var(--muted)'; }
+function edgeWidth(v) { return Math.min(Math.abs(v || 0) * 800, 60); }
+
+async function loadDashboard() {
+  // System status
+  const { data: status } = await sb.from('system_status').select('*').eq('id', 1).single();
+  if (status) {
+    document.getElementById('stat-bets').textContent = status.total_bets || 0;
+    const clvEl = document.getElementById('stat-clv');
+    clvEl.textContent = pp(status.mean_clv_pp);
+    clvEl.className = 'value ' + (status.mean_clv_pp > 0 ? 'pos' : status.mean_clv_pp < 0 ? 'neg' : '');
+    document.getElementById('stat-gate').textContent = status.gate_status?.toUpperCase() || '--';
+    document.getElementById('stat-gate').className = 'value ' + (status.gate_status === 'PASS' ? 'pos' : status.gate_status === 'FAIL' ? 'neg' : 'neutral');
+    const ago = status.last_run ? timeAgo(new Date(status.last_run)) : 'never';
+    document.getElementById('status-line').textContent =
+      `${status.model_version} | ${status.feature_count} features | Last run: ${ago} | ${status.total_bets}/${status.gate_bets_needed + status.total_bets} bets to gate`;
+  }
+
+  // Today's predictions (bets)
+  const { data: preds } = await sb.from('predictions').select('*').eq('game_date', today).order('edge_a', { ascending: false });
+  const betsBody = document.getElementById('bets-body');
+  const bets = (preds || []).filter(p => p.bet_side !== 0);
+  const allPreds = preds || [];
+
+  // Win rate from settled bets
+  const { data: settledBets } = await sb.from('predictions').select('bet_side, actual_home_win').not('settled_at', 'is', null).neq('bet_side', 0);
+  if (settledBets && settledBets.length > 0) {
+    const wins = settledBets.filter(b =>
+      (b.bet_side === 1 && b.actual_home_win === 1) || (b.bet_side === -1 && b.actual_home_win === 0)
+    ).length;
+    document.getElementById('stat-wr').textContent = (wins / settledBets.length * 100).toFixed(0) + '%';
+  }
+
+  // Market tabs
+  const markets = [...new Set(allPreds.map(p => p.market))];
+  const tabsEl = document.getElementById('market-tabs');
+  tabsEl.innerHTML = '<button class="tab active" data-market="bets">Bets Only</button>' +
+    markets.map(m => `<button class="tab" data-market="${m}">${m.replace('_',' ')}</button>`).join('');
+
+  tabsEl.addEventListener('click', e => {
+    if (!e.target.matches('.tab')) return;
+    tabsEl.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    e.target.classList.add('active');
+    renderBets(e.target.dataset.market === 'bets' ? bets : allPreds.filter(p => p.market === e.target.dataset.market));
+  });
+
+  if (bets.length === 0) {
+    document.getElementById('no-bets').style.display = 'block';
+  } else {
+    renderBets(bets);
+  }
+
+  // Pitcher K props
+  const { data: props } = await sb.from('prop_predictions').select('*').eq('game_date', today).order('edge_a', { ascending: false });
+  const propsBody = document.getElementById('props-body');
+  if (!props || props.length === 0) {
+    document.getElementById('no-props').style.display = 'block';
+  } else {
+    propsBody.innerHTML = props.map(p => {
+      const edge = p.edge_a;
+      const signal = p.bet_side === 1 ? '<span class="bet-tag over">OVER</span>' :
+                     p.bet_side === -1 ? '<span class="bet-tag under">UNDER</span>' : '';
+      const flags = [];
+      if (p.has_lineup === false) flags.push('<span class="flag warn">no-LU</span>');
+      if (p.has_umpire === false) flags.push('<span class="flag warn">no-UMP</span>');
+      if (flags.length === 0) flags.push('<span class="flag ok">ok</span>');
+      return `<tr>
+        <td>${p.pitcher_name}</td>
+        <td>${p.opp_team || '?'}</td>
+        <td>${p.k_line?.toFixed(1) || '?'}</td>
+        <td>${pct(p.open_over_implied)}</td>
+        <td>${pct(p.pred_a)}</td>
+        <td style="color:${edgeColor(edge)}">${edge != null ? (edge > 0 ? '+' : '') + (edge * 100).toFixed(1) + '%' : 'n/a'}
+          <span class="edge-bar" style="background:${edgeColor(edge)};width:${edgeWidth(edge)}px"></span>
+        </td>
+        <td>${signal}</td>
+        <td>${flags.join(' ')}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // CLV chart
+  const { data: summary } = await sb.from('daily_summary').select('*').order('game_date');
+  if (summary && summary.length > 0) {
+    const ctx = document.getElementById('clv-chart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: summary.map(s => s.game_date),
+        datasets: [
+          {
+            label: 'Cumulative CLV (pp)',
+            data: summary.map(s => s.cumulative_clv_pp),
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59,130,246,0.1)',
+            fill: true, tension: 0.3, pointRadius: 2,
+          },
+          {
+            label: 'Daily Bets',
+            data: summary.map(s => s.n_bets),
+            borderColor: '#8b8fa3',
+            backgroundColor: 'rgba(139,143,163,0.1)',
+            fill: false, tension: 0.3, pointRadius: 2,
+            yAxisID: 'y1',
+          }
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#8b8fa3', font: { size: 11 } } } },
+        scales: {
+          x: { ticks: { color: '#8b8fa3', font: { size: 10 }, maxTicksLimit: 10 }, grid: { color: '#2a2d37' } },
+          y: { ticks: { color: '#3b82f6', font: { size: 10 } }, grid: { color: '#2a2d37' },
+               title: { display: true, text: 'CLV (pp)', color: '#8b8fa3' } },
+          y1: { position: 'right', ticks: { color: '#8b8fa3', font: { size: 10 } }, grid: { display: false },
+                title: { display: true, text: 'Bets', color: '#8b8fa3' } },
+        }
+      }
+    });
+  }
+
+  // Market breakdown (season)
+  const { data: allSettled } = await sb.from('predictions').select('market, bet_side, clv_pp, actual_home_win')
+    .not('settled_at', 'is', null).neq('bet_side', 0);
+  const marketBody = document.getElementById('market-body');
+  if (allSettled && allSettled.length > 0) {
+    const byMarket = {};
+    allSettled.forEach(r => {
+      if (!byMarket[r.market]) byMarket[r.market] = { bets: 0, clv: [], wins: 0 };
+      byMarket[r.market].bets++;
+      if (r.clv_pp != null) byMarket[r.market].clv.push(r.clv_pp);
+      if ((r.bet_side === 1 && r.actual_home_win === 1) || (r.bet_side === -1 && r.actual_home_win === 0))
+        byMarket[r.market].wins++;
+    });
+    marketBody.innerHTML = Object.entries(byMarket).map(([mkt, d]) => {
+      const avgClv = d.clv.length > 0 ? d.clv.reduce((a, b) => a + b, 0) / d.clv.length : null;
+      const wr = d.bets > 0 ? d.wins / d.bets : null;
+      return `<tr>
+        <td>${mkt.replace('_', ' ')}</td>
+        <td>${d.bets}</td>
+        <td class="${avgClv > 0 ? 'pos' : 'neg'}">${pp(avgClv)}</td>
+        <td>${wr != null ? (wr * 100).toFixed(0) + '%' : 'n/a'}</td>
+      </tr>`;
+    }).join('');
+  }
+}
+
+function renderBets(rows) {
+  const body = document.getElementById('bets-body');
+  const noBets = document.getElementById('no-bets');
+  if (!rows || rows.length === 0) {
+    body.innerHTML = '';
+    noBets.style.display = 'block';
+    return;
+  }
+  noBets.style.display = 'none';
+  body.innerHTML = rows.map(r => {
+    const edge = r.edge_a;
+    const isHome = r.bet_side === 1;
+    const sideLabel = r.bet_side === 0 ? '--' :
+      isHome ? `<span class="bet-tag home">${r.home_team}</span>` :
+               `<span class="bet-tag away">${r.away_team}</span>`;
+    const ourP = isHome ? r.model_a_pred : (1 - r.model_a_pred);
+    const mktP = isHome ? r.open_implied_prob : (1 - r.open_implied_prob);
+    // Kelly
+    const d = 1 / Math.max(mktP, 0.01);
+    const kelly = Math.max(0, (ourP * (d - 1) - (1 - ourP)) / (d - 1)) * 0.25;
+    return `<tr>
+      <td>${r.away_team} @ ${r.home_team}</td>
+      <td>${r.market.replace('_',' ')}</td>
+      <td>${sideLabel}</td>
+      <td style="color:${edgeColor(edge)}">${edge != null ? (edge > 0 ? '+' : '') + (edge * 100).toFixed(1) + '%' : 'n/a'}
+        <span class="edge-bar" style="background:${edgeColor(edge)};width:${edgeWidth(edge)}px"></span>
+      </td>
+      <td>${pct(ourP)}</td>
+      <td>${pct(mktP)}</td>
+      <td>${(kelly * 100).toFixed(1)}%</td>
+    </tr>`;
+  }).join('');
+}
+
+function timeAgo(d) {
+  const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+loadDashboard();
+// Auto-refresh every 5 minutes
+setInterval(loadDashboard, 300000);
+</script>
+</body>
+</html>
