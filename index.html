@@ -86,9 +86,9 @@
 <!-- PITCHER K PROPS -->
 <div class="section">
   <h2>Pitcher K Props</h2>
-  <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Over/Under probabilities vs DraftKings line. "Model Over%" = model's probability of going OVER the posted K line.</p>
+  <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Model probability vs DK line for both Over and Under. Edge accounts for vig on each side.</p>
   <table>
-    <thead><tr><th>Pitcher</th><th>Team</th><th>vs</th><th>K Line</th><th>Model Over%</th><th>DK Over%</th><th>Edge</th><th>Lean</th><th>Data</th></tr></thead>
+    <thead><tr><th>Pitcher</th><th>Team</th><th>vs</th><th>Line</th><th>Side</th><th>DK Odds</th><th>DK Imp%</th><th>Model%</th><th>Edge</th><th>Data</th></tr></thead>
     <tbody id="props-body"></tbody>
   </table>
   <div id="no-props" class="empty" style="display:none;">No pitcher K predictions today.</div>
@@ -241,39 +241,68 @@ async function loadDashboard() {
   if (!props || props.length === 0) {
     document.getElementById('no-props').style.display = 'block';
   } else {
-    propsBody.innerHTML = props.sort((a, b) => Math.abs(b.edge_a || 0) - Math.abs(a.edge_a || 0)).map(p => {
-      const modelOver = p.pred_a;   // model's P(over)
-      const mktOver = p.open_over_implied;  // market's P(over)
-      const edge = p.edge_a;  // model_over - market_over
+    // Two rows per pitcher: OVER and UNDER with edges computed from vig-adjusted prices
+    const propRows = [];
+    props.sort((a, b) => Math.abs(b.edge_a || 0) - Math.abs(a.edge_a || 0)).forEach(p => {
+      const modelOver = p.pred_a;
+      const modelUnder = modelOver != null ? 1 - modelOver : null;
+      const mktOver = p.open_over_implied;
+      // DK vig: over_imp + under_imp > 1.0. We need the actual under implied.
+      // If we have mktOver, DK under implied ≈ (1 - mktOver) adjusted for vig.
+      // Approximate: assume symmetric vig distribution
+      // Better: use stored under_implied if available, else estimate
+      const totalVig = 1.059; // typical -110/-110 vig
+      const mktUnder = mktOver != null ? (totalVig - mktOver) : null;
 
-      // Lean: positive edge = model likes OVER, negative = UNDER
-      let lean = '';
-      if (p.bet_side === 1) lean = '<span class="tag over">OVER</span>';
-      else if (p.bet_side === -1) lean = '<span class="tag under">UNDER</span>';
-      else if (edge > 0.005) lean = '<span style="color:var(--orange);font-size:0.75rem">~ over</span>';
-      else if (edge < -0.005) lean = '<span style="color:var(--blue);font-size:0.75rem">~ under</span>';
+      const edgeOver = (modelOver != null && mktOver != null) ? modelOver - mktOver : null;
+      const edgeUnder = (modelUnder != null && mktUnder != null) ? modelUnder - mktUnder : null;
 
-      const edgeColor = Math.abs(edge) > 0.02 ? 'var(--green)' : 'var(--muted)';
-
-      // Data flags
+      // Data flags (same for both rows)
       const flags = [];
       if (p.has_lineup === false) flags.push('<span class="flag warn">no-LU</span>');
       if (p.has_umpire === false) flags.push('<span class="flag warn">no-UMP</span>');
-      if (flags.length === 0) flags.push('<span class="flag ok">ok</span>');
+      const flagStr = flags.length > 0 ? flags.join(' ') : '<span class="flag ok">ok</span>';
 
-      return `<tr>
+      // Determine best side
+      const bestEdge = Math.max(edgeOver || -1, edgeUnder || -1);
+      const overIsBetter = (edgeOver || 0) >= (edgeUnder || 0);
+
+      // Over row
+      const overColor = (edgeOver || 0) > 0.02 ? 'var(--green)' : (edgeOver || 0) > 0 ? 'var(--orange)' : 'var(--muted)';
+      const overBold = overIsBetter ? 'font-weight:600' : 'opacity:0.5';
+      const overOdds = mktOver != null ? impliedToAmerican(mktOver) : '--';
+
+      propRows.push(`<tr style="${overBold}">
         <td>${p.pitcher_name}</td>
         <td>${p.team || '?'}</td>
         <td>${p.opp_team || '?'}</td>
-        <td><strong>${p.k_line?.toFixed(1) || '?'}</strong></td>
-        <td>${pct(modelOver)}</td>
+        <td>${p.k_line?.toFixed(1) || '?'}</td>
+        <td><span class="tag over">OVER</span></td>
+        <td class="odds">${overOdds}</td>
         <td>${pct(mktOver)}</td>
-        <td style="color:${edgeColor}">${edge != null ? (edge > 0 ? '+' : '') + (edge * 100).toFixed(1) + '%' : '--'}
-          <span class="edge-bar" style="background:${edgeColor};width:${Math.min(Math.abs(edge || 0) * 800, 50)}px"></span></td>
-        <td>${lean}</td>
-        <td>${flags.join(' ')}</td>
-      </tr>`;
-    }).join('');
+        <td>${pct(modelOver)}</td>
+        <td style="color:${overColor}">${edgeOver != null ? (edgeOver > 0 ? '+' : '') + (edgeOver * 100).toFixed(1) + '%' : '--'}
+          <span class="edge-bar" style="background:${overColor};width:${Math.min(Math.abs(edgeOver || 0) * 800, 50)}px"></span></td>
+        <td>${flagStr}</td>
+      </tr>`);
+
+      // Under row
+      const underColor = (edgeUnder || 0) > 0.02 ? 'var(--green)' : (edgeUnder || 0) > 0 ? 'var(--blue)' : 'var(--muted)';
+      const underBold = !overIsBetter ? 'font-weight:600' : 'opacity:0.5';
+      const underOdds = mktUnder != null ? impliedToAmerican(mktUnder) : '--';
+
+      propRows.push(`<tr style="${underBold}">
+        <td></td><td></td><td></td><td></td>
+        <td><span class="tag under">UNDER</span></td>
+        <td class="odds">${underOdds}</td>
+        <td>${pct(mktUnder)}</td>
+        <td>${pct(modelUnder)}</td>
+        <td style="color:${underColor}">${edgeUnder != null ? (edgeUnder > 0 ? '+' : '') + (edgeUnder * 100).toFixed(1) + '%' : '--'}
+          <span class="edge-bar" style="background:${underColor};width:${Math.min(Math.abs(edgeUnder || 0) * 800, 50)}px"></span></td>
+        <td></td>
+      </tr>`);
+    });
+    propsBody.innerHTML = propRows.join('');
   }
 
   // === CLV CHART ===
