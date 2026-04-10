@@ -122,6 +122,49 @@ function impliedToAmerican(p) {
   return p >= 0.5 ? Math.round(-p / (1 - p) * 100) : '+' + Math.round((1 - p) / p * 100);
 }
 
+// Market display names
+const MARKET_LABELS = {
+  'ml_full': 'ML', 'rl_full': 'RL -1.5', 'total_full': 'Total',
+  'ml_f5': 'F5 ML', 'rl_f5': 'F5 RL', 'total_f5': 'F5 Total',
+  'team_total_home': 'Team O/U', 'team_total_away': 'Team O/U',
+  'nrfi': 'NRFI',
+};
+
+// Markets where the prediction is about over/under (not team sides)
+const OVER_UNDER_MARKETS = new Set(['total_full', 'total_f5', 'team_total_home', 'team_total_away', 'nrfi']);
+
+function formatPick(r) {
+  // Returns { pickLabel, ourP, mktP, edge } from the bet's perspective
+  const mkt = r.market;
+
+  if (mkt === 'nrfi') {
+    // bet_side=+1 means NRFI, -1 means YRFI
+    if (r.bet_side === 1) return { pickLabel: 'NRFI', ourP: r.model_b_pred, mktP: r.open_implied_prob, edge: Math.abs(r.edge_a) };
+    if (r.bet_side === -1) return { pickLabel: 'YRFI', ourP: 1 - r.model_b_pred, mktP: 1 - r.open_implied_prob, edge: Math.abs(r.edge_a) };
+    // No bet — show lean
+    const lean = r.model_b_pred > 0.5 ? 'NRFI' : 'YRFI';
+    return { pickLabel: lean, ourP: r.model_b_pred > 0.5 ? r.model_b_pred : 1 - r.model_b_pred, mktP: r.open_implied_prob, edge: Math.abs(r.edge_a || 0) };
+  }
+
+  if (OVER_UNDER_MARKETS.has(mkt)) {
+    // bet_side=+1 means OVER, -1 means UNDER (for totals)
+    const teamNote = mkt === 'team_total_home' ? ` (${r.home_team})` : mkt === 'team_total_away' ? ` (${r.away_team})` : '';
+    if (r.bet_side === 1) return { pickLabel: 'OVER' + teamNote, ourP: r.model_a_pred || r.model_b_pred, mktP: r.open_implied_prob, edge: Math.abs(r.edge_a) };
+    if (r.bet_side === -1) return { pickLabel: 'UNDER' + teamNote, ourP: 1 - (r.model_a_pred || r.model_b_pred), mktP: 1 - r.open_implied_prob, edge: Math.abs(r.edge_a) };
+    const lean = (r.edge_a || 0) > 0 ? 'Over' : 'Under';
+    return { pickLabel: lean + teamNote, ourP: r.model_a_pred || r.model_b_pred, mktP: r.open_implied_prob, edge: Math.abs(r.edge_a || 0) };
+  }
+
+  // ML / RL markets — team-side bets
+  const isHome = r.bet_side === 1 || (r.bet_side === 0 && (r.edge_a || 0) > 0);
+  const pickTeam = isHome ? r.home_team : r.away_team;
+  const suffix = mkt.includes('f5') ? ' (F5)' : mkt === 'rl_full' ? ' -1.5' : '';
+  const pickLabel = `${pickTeam}${suffix}`;
+  const ourP = isHome ? (r.model_a_pred || r.model_b_pred) : 1 - (r.model_a_pred || r.model_b_pred);
+  const mktP = isHome ? r.open_implied_prob : 1 - (r.open_implied_prob || 0);
+  return { pickLabel, ourP, mktP, edge: Math.abs(r.edge_a || 0) };
+}
+
 async function loadDashboard() {
   // System status
   const { data: status } = await sb.from('system_status').select('*').eq('id', 1).single();
@@ -155,20 +198,13 @@ async function loadDashboard() {
     document.getElementById('no-bets').style.display = 'block';
   } else {
     betsBody.innerHTML = bets.sort((a, b) => Math.abs(b.edge_a || 0) - Math.abs(a.edge_a || 0)).map(r => {
-      const isHome = r.bet_side === 1;
-      const pickTeam = isHome ? r.home_team : r.away_team;
-      const pickLabel = isHome ? `${r.home_team} (HOME)` : `${r.away_team} (AWAY)`;
-      // Probabilities from the PICKED SIDE's perspective
-      const ourP = isHome ? r.model_a_pred : (1 - r.model_a_pred);
-      const mktP = isHome ? r.open_implied_prob : (1 - r.open_implied_prob);
-      const edge = ourP - mktP;
+      const { pickLabel, ourP, mktP, edge } = formatPick(r);
       const american = impliedToAmerican(mktP);
-      // Kelly
       const d = 1 / Math.max(mktP, 0.01);
       const kelly = Math.max(0, (ourP * (d - 1) - (1 - ourP)) / (d - 1)) * 0.25;
       return `<tr>
         <td>${r.away_team} @ ${r.home_team}</td>
-        <td>${r.market.replace(/_/g,' ')}</td>
+        <td>${MARKET_LABELS[r.market] || r.market}</td>
         <td><strong>${pickLabel}</strong></td>
         <td class="odds">${american}</td>
         <td>${pct(ourP)}</td>
@@ -184,30 +220,13 @@ async function loadDashboard() {
   const allBody = document.getElementById('all-preds-body');
   allBody.innerHTML = allPreds.sort((a, b) => Math.abs(b.edge_a || 0) - Math.abs(a.edge_a || 0)).map(r => {
     const isBet = r.bet_side !== 0;
-    // Determine which side the model leans toward
-    let leanTeam, ourP, mktP;
-    if (r.edge_a > 0) {
-      // Model thinks home is undervalued
-      leanTeam = r.home_team;
-      ourP = r.model_a_pred;
-      mktP = r.open_implied_prob;
-    } else if (r.edge_a < 0) {
-      // Model thinks away is undervalued
-      leanTeam = r.away_team;
-      ourP = 1 - r.model_a_pred;
-      mktP = 1 - (r.open_implied_prob || 0);
-    } else {
-      leanTeam = '--';
-      ourP = r.model_a_pred;
-      mktP = r.open_implied_prob;
-    }
-    const edge = r.edge_a ? Math.abs(r.edge_a) : 0;
-    const statusTag = isBet ? '<span class="tag bet">BET</span>' : '<span class="tag shadow">no bet</span>';
+    const { pickLabel, ourP, mktP, edge } = formatPick(r);
+    const statusTag = isBet ? '<span class="tag bet">BET</span>' : '<span class="tag shadow">tracking</span>';
     const edgeColor = edge > 0.02 ? 'var(--green)' : 'var(--muted)';
     return `<tr style="opacity:${isBet ? 1 : 0.6}">
       <td>${r.away_team} @ ${r.home_team}</td>
-      <td>${r.market.replace(/_/g,' ')}</td>
-      <td>${leanTeam}</td>
+      <td>${MARKET_LABELS[r.market] || r.market}</td>
+      <td>${pickLabel}</td>
       <td>${pct(ourP)}</td>
       <td>${pct(mktP)}</td>
       <td style="color:${edgeColor}">${(edge * 100).toFixed(1)}%
