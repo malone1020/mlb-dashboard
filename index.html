@@ -94,6 +94,17 @@
   <div id="no-props" class="empty" style="display:none;">No pitcher K predictions today.</div>
 </div>
 
+<!-- BATTER PROPS -->
+<div class="card">
+  <h2>Batter Props</h2>
+  <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Model vs market for batter hit/TB props. Only showing edges > 2%.</p>
+  <table>
+    <thead><tr><th>Batter</th><th>Market</th><th>Line</th><th>DK Imp%</th><th>Model%</th><th>Edge</th><th>Side</th></tr></thead>
+    <tbody id="batter-props-body"></tbody>
+  </table>
+  <div id="no-batter-props" class="empty" style="display:none;">No batter prop edges today.</div>
+</div>
+
 <!-- CLV CHART -->
 <div class="section">
   <h2>Performance</h2>
@@ -343,6 +354,45 @@ async function loadDashboard() {
       </tr>`);
     });
     propsBody.innerHTML = propRows.join('');
+  }
+
+  // === BATTER PROPS ===
+  // Batter props are stored in prop_predictions with market like 'batter_%'
+  const batterPropsBody = document.getElementById('batter-props-body');
+  const batterProps = (props || []).filter(p => p.market && p.market.startsWith('batter_'));
+  if (batterProps.length === 0) {
+    document.getElementById('no-batter-props').style.display = 'block';
+  } else {
+    const MARKET_SHORT = {
+      'batter_hits': 'Hits', 'batter_total_bases': 'Total Bases',
+      'batter_home_runs': 'HRs', 'batter_rbis': 'RBIs',
+      'batter_hits_runs_rbis': 'H+R+RBI',
+    };
+    const filtered = batterProps
+      .filter(p => Math.abs(p.edge_a || 0) > 0.02)
+      .sort((a, b) => Math.abs(b.edge_a || 0) - Math.abs(a.edge_a || 0));
+    if (filtered.length === 0) {
+      document.getElementById('no-batter-props').style.display = 'block';
+    } else {
+      batterPropsBody.innerHTML = filtered.map(p => {
+        const edge = Math.abs(p.edge_a || 0);
+        const side = (p.edge_a || 0) > 0 ? 'OVER' : 'UNDER';
+        const sideClass = side === 'OVER' ? 'over' : 'under';
+        const modelP = side === 'OVER' ? p.pred_a : (1 - p.pred_a);
+        const mktP = side === 'OVER' ? p.open_over_implied : (1 - (p.open_over_implied || 0.5));
+        const edgeColor = edge > 0.05 ? 'var(--green)' : 'var(--orange)';
+        return `<tr>
+          <td><strong>${p.pitcher_name}</strong></td>
+          <td>${MARKET_SHORT[p.market] || p.market}</td>
+          <td>${p.k_line?.toFixed(1) || '?'}</td>
+          <td>${pct(mktP)}</td>
+          <td>${pct(modelP)}</td>
+          <td style="color:${edgeColor}">+${(edge * 100).toFixed(1)}%
+            <span class="edge-bar" style="background:${edgeColor};width:${Math.min(edge * 800, 50)}px"></span></td>
+          <td><span class="tag ${sideClass}">${side}</span></td>
+        </tr>`;
+      }).join('');
+    }
   }
 
   // === CLV CHART ===
