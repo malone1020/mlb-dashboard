@@ -247,38 +247,36 @@ async function loadDashboard() {
       const modelOver = p.pred_a;
       const modelUnder = modelOver != null ? 1 - modelOver : null;
       const mktOver = p.open_over_implied;
-      // DK vig: over_imp + under_imp > 1.0. We need the actual under implied.
-      // If we have mktOver, DK under implied ≈ (1 - mktOver) adjusted for vig.
-      // Approximate: assume symmetric vig distribution
-      // Better: use stored under_implied if available, else estimate
-      const totalVig = 1.059; // typical -110/-110 vig
-      const mktUnder = mktOver != null ? (totalVig - mktOver) : null;
+      const mktUnder = p.open_under_implied;  // real DK under implied (includes vig)
+      const overPrice = p.over_price;
+      const underPrice = p.under_price;
 
       const edgeOver = (modelOver != null && mktOver != null) ? modelOver - mktOver : null;
       const edgeUnder = (modelUnder != null && mktUnder != null) ? modelUnder - mktUnder : null;
 
-      // Data flags (same for both rows)
+      // Data flags
       const flags = [];
       if (p.has_lineup === false) flags.push('<span class="flag warn">no-LU</span>');
       if (p.has_umpire === false) flags.push('<span class="flag warn">no-UMP</span>');
       const flagStr = flags.length > 0 ? flags.join(' ') : '<span class="flag ok">ok</span>';
 
       // Determine best side
-      const bestEdge = Math.max(edgeOver || -1, edgeUnder || -1);
-      const overIsBetter = (edgeOver || 0) >= (edgeUnder || 0);
+      const overIsBetter = (edgeOver || -99) >= (edgeUnder || -99);
+
+      // Format American odds from actual prices
+      const fmtPrice = (p) => p == null ? '--' : (p > 0 ? '+' + p : '' + p);
 
       // Over row
       const overColor = (edgeOver || 0) > 0.02 ? 'var(--green)' : (edgeOver || 0) > 0 ? 'var(--orange)' : 'var(--muted)';
-      const overBold = overIsBetter ? 'font-weight:600' : 'opacity:0.5';
-      const overOdds = mktOver != null ? impliedToAmerican(mktOver) : '--';
+      const overStyle = overIsBetter ? 'font-weight:600' : 'opacity:0.5';
 
-      propRows.push(`<tr style="${overBold}">
+      propRows.push(`<tr style="${overStyle}">
         <td>${p.pitcher_name}</td>
         <td>${p.team || '?'}</td>
         <td>${p.opp_team || '?'}</td>
         <td>${p.k_line?.toFixed(1) || '?'}</td>
         <td><span class="tag over">OVER</span></td>
-        <td class="odds">${overOdds}</td>
+        <td class="odds">${fmtPrice(overPrice)}</td>
         <td>${pct(mktOver)}</td>
         <td>${pct(modelOver)}</td>
         <td style="color:${overColor}">${edgeOver != null ? (edgeOver > 0 ? '+' : '') + (edgeOver * 100).toFixed(1) + '%' : '--'}
@@ -288,13 +286,12 @@ async function loadDashboard() {
 
       // Under row
       const underColor = (edgeUnder || 0) > 0.02 ? 'var(--green)' : (edgeUnder || 0) > 0 ? 'var(--blue)' : 'var(--muted)';
-      const underBold = !overIsBetter ? 'font-weight:600' : 'opacity:0.5';
-      const underOdds = mktUnder != null ? impliedToAmerican(mktUnder) : '--';
+      const underStyle = !overIsBetter ? 'font-weight:600' : 'opacity:0.5';
 
-      propRows.push(`<tr style="${underBold}">
+      propRows.push(`<tr style="${underStyle}">
         <td></td><td></td><td></td><td></td>
         <td><span class="tag under">UNDER</span></td>
-        <td class="odds">${underOdds}</td>
+        <td class="odds">${fmtPrice(underPrice)}</td>
         <td>${pct(mktUnder)}</td>
         <td>${pct(modelUnder)}</td>
         <td style="color:${underColor}">${edgeUnder != null ? (edgeUnder > 0 ? '+' : '') + (edgeUnder * 100).toFixed(1) + '%' : '--'}
