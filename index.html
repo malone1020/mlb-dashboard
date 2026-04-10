@@ -65,9 +65,9 @@
 <!-- BET CARD: only rows where bet_side != 0 -->
 <div class="section">
   <h2>Today's Bets</h2>
-  <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Only games where the dual-signal fires. "Pick" = the team/side the model recommends.</p>
+  <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Only games where the dual-signal fires. "AM Edge" = morning pre-lineup prediction. "Edge" = latest with lineups. Arrow shows change.</p>
   <table>
-    <thead><tr><th>Game</th><th>Market</th><th>Pick</th><th>Odds</th><th>Model</th><th>Market</th><th>Edge</th><th>Kelly</th></tr></thead>
+    <thead><tr><th>Game</th><th>Market</th><th>Pick</th><th>Odds</th><th>AM Edge</th><th>Edge</th><th>Chg</th><th>LU</th><th>Kelly</th></tr></thead>
     <tbody id="bets-body"></tbody>
   </table>
   <div id="no-bets" class="empty" style="display:none;">No bets firing today. Model sees no edge above threshold.</div>
@@ -202,15 +202,32 @@ async function loadDashboard() {
       const american = impliedToAmerican(mktP);
       const d = 1 / Math.max(mktP, 0.01);
       const kelly = Math.max(0, (ourP * (d - 1) - (1 - ourP)) / (d - 1)) * 0.25;
+
+      // Two-pass: morning edge vs current
+      const earlyEdge = r.early_edge_a != null ? Math.abs(r.early_edge_a) : null;
+      const earlyStr = earlyEdge != null ? `${(earlyEdge * 100).toFixed(1)}%` : '--';
+      const edgeChange = (earlyEdge != null && edge != null) ? edge - earlyEdge : null;
+      let changeStr = '--';
+      let changeColor = 'var(--muted)';
+      if (edgeChange != null) {
+        if (edgeChange > 0.005) { changeStr = '&#x25B2;'; changeColor = 'var(--green)'; }      // grew
+        else if (edgeChange < -0.005) { changeStr = '&#x25BC;'; changeColor = 'var(--red)'; }   // shrank
+        else { changeStr = '&#x25C6;'; changeColor = 'var(--muted)'; }                          // stable
+      }
+
+      // Lineup flag
+      const luFlag = r.has_lineup_data ? '<span class="flag ok">LU</span>' : '<span class="flag warn">no LU</span>';
+
       return `<tr>
         <td>${r.away_team} @ ${r.home_team}</td>
         <td>${MARKET_LABELS[r.market] || r.market}</td>
         <td><strong>${pickLabel}</strong></td>
         <td class="odds">${american}</td>
-        <td>${pct(ourP)}</td>
-        <td>${pct(mktP)}</td>
+        <td style="color:var(--muted)">${earlyStr}</td>
         <td class="pos">+${(edge * 100).toFixed(1)}%
           <span class="edge-bar" style="background:var(--green);width:${Math.min(edge * 800, 60)}px"></span></td>
+        <td style="color:${changeColor};font-size:1.1rem">${changeStr}</td>
+        <td>${luFlag}</td>
         <td>${(kelly * 100).toFixed(1)}%</td>
       </tr>`;
     }).join('');
