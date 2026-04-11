@@ -106,7 +106,7 @@
   <h2>Batter Props <span style="font-size:0.7rem;color:var(--orange);font-weight:normal">(BETA — line mapping under review)</span></h2>
   <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Model vs market for batter hit/TB props. Only showing edges > 5%.</p>
   <table>
-    <thead><tr><th>Batter</th><th>Market</th><th>Line</th><th>DK Imp%</th><th>Model%</th><th>Edge</th><th>Side</th></tr></thead>
+    <thead><tr><th>Batter</th><th>vs SP</th><th>Market</th><th>Line</th><th>DK Imp%</th><th>Model%</th><th>Edge</th><th>Side</th></tr></thead>
     <tbody id="batter-props-body"></tbody>
   </table>
   <div id="no-batter-props" class="empty" style="display:none;">No batter prop edges today.</div>
@@ -346,7 +346,7 @@ async function loadDashboard() {
       let timeStr = '--';
       if (r.commence_time_utc) {
         const [h, m] = r.commence_time_utc.split(':').map(Number);
-        let cstH = ((h - 6) % 24 + 24) % 24;
+        let cstH = ((h - 5) % 24 + 24) % 24; // UTC-5 = CDT (MLB season is always daylight saving)
         const ampm = cstH >= 12 ? 'PM' : 'AM';
         if (cstH > 12) cstH -= 12;
         if (cstH === 0) cstH = 12;
@@ -404,7 +404,7 @@ async function loadDashboard() {
     let timeStr = '--';
     if (r.commence_time_utc) {
       const [h, m] = r.commence_time_utc.split(':').map(Number);
-      let cstH = ((h - 6) % 24 + 24) % 24;
+      let cstH = ((h - 5) % 24 + 24) % 24; // UTC-5 = CDT (MLB season is always daylight saving)
       const ampm = cstH >= 12 ? 'PM' : 'AM';
       if (cstH > 12) cstH -= 12;
       if (cstH === 0) cstH = 12;
@@ -497,6 +497,12 @@ async function loadDashboard() {
 
   // === BATTER PROPS (beta) ===
   const batterPropsBody = document.getElementById('batter-props-body');
+  // Build team → opposing SP lookup from game-level predictions
+  const spLookup = {};  // { "NYY": "Bassitt", "BAL": "Cole" }
+  for (const p of allPreds) {
+    if (p.home_sp_name && p.away_team) spLookup[p.away_team] = (p.home_sp_name || '').split(' ').pop();
+    if (p.away_sp_name && p.home_team) spLookup[p.home_team] = (p.away_sp_name || '').split(' ').pop();
+  }
   const { data: batterData } = await sb.from('prop_predictions').select('*').eq('game_date', today).like('market', 'batter_%').order('edge_a', { ascending: false });
   const batterProps = batterData || [];
   if (batterProps.length === 0) {
@@ -520,8 +526,10 @@ async function loadDashboard() {
         const modelP = side === 'OVER' ? p.pred_a : (1 - p.pred_a);
         const mktP = side === 'OVER' ? p.open_over_implied : (1 - (p.open_over_implied || 0.5));
         const edgeColor = edge > 0.05 ? 'var(--green)' : 'var(--orange)';
+        const oppSP = spLookup[p.team] || '?';
         return `<tr>
           <td><strong>${p.pitcher_name}</strong></td>
+          <td style="font-size:0.75rem;color:var(--muted)">vs ${oppSP}</td>
           <td>${MARKET_SHORT[p.market] || p.market}</td>
           <td>${p.k_line?.toFixed(1) || '?'}</td>
           <td>${pct(mktP)}</td>
