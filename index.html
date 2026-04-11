@@ -166,7 +166,7 @@ function impliedToAmerican(p) {
 
 // Market display names
 const MARKET_LABELS = {
-  'ml_full': 'ML', 'rl_full': 'RL -1.5', 'total_full': 'Total',
+  'ml_full': 'ML', 'rl_full': 'RL', 'total_full': 'Total',
   'ml_f5': 'F5 ML', 'rl_f5': 'F5 RL', 'total_f5': 'F5 Total',
   'team_total_home': 'Team O/U', 'team_total_away': 'Team O/U',
   'nrfi': 'NRFI',
@@ -201,7 +201,18 @@ function formatPick(r) {
   // ML / RL markets — team-side bets
   const isHome = r.bet_side === 1 || (r.bet_side === 0 && (r.edge_a || 0) > 0);
   const pickTeam = isHome ? r.home_team : r.away_team;
-  const suffix = mkt.includes('f5') ? ' (F5)' : mkt === 'rl_full' ? ' -1.5' : '';
+  let suffix = '';
+  if (mkt === 'rl_full') {
+    // Spread is stored from home perspective: -1.5 = home fav, +1.5 = home dog
+    // Show the spread from the bet side's perspective
+    const homeSpread = r.total_line || -1.5;
+    const betSpread = isHome ? homeSpread : -homeSpread;
+    suffix = ` ${betSpread > 0 ? '+' : ''}${betSpread}`;
+  } else if (mkt.includes('f5') && mkt.includes('rl')) {
+    suffix = ' (F5 RL)';
+  } else if (mkt.includes('f5')) {
+    suffix = ' (F5)';
+  }
   const pickLabel = `${pickTeam}${suffix}`;
   const ourP = isHome ? (r.model_a_pred || r.model_b_pred) : 1 - (r.model_a_pred || r.model_b_pred);
   // Use DK price (with vig) for market probability display
