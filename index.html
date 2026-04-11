@@ -74,7 +74,7 @@
   <h2 id="bets-header">Bets</h2>
   <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Only bets with edge at the current DK price. Filtered out if line moved past fair value.</p>
   <table>
-    <thead><tr><th>Game</th><th>Market</th><th>Pick</th><th>DK Line</th><th>Fair</th><th>Edge</th><th>LU</th><th>Kelly</th></tr></thead>
+    <thead><tr><th>Game</th><th>SPs</th><th>Market</th><th>Pick</th><th>DK Line</th><th>Fair</th><th>Edge</th><th>LU</th><th>Kelly</th></tr></thead>
     <tbody id="bets-body"></tbody>
   </table>
   <div id="no-bets" class="empty" style="display:none;">No bets firing today. Model sees no edge above threshold.</div>
@@ -298,14 +298,18 @@ async function loadDashboard() {
       // Lineup flag
       const luFlag = r.has_lineup_data ? '<span class="flag ok">LU</span>' : '<span class="flag warn">no LU</span>';
 
+      // SP names (last names only for space)
+      const awSP = (r.away_sp_name || '').split(' ').pop() || '?';
+      const hmSP = (r.home_sp_name || '').split(' ').pop() || '?';
+
       return `<tr>
         <td>${r.away_team} @ ${r.home_team}</td>
+        <td style="font-size:0.75rem;color:var(--muted)">${awSP} vs ${hmSP}</td>
         <td>${MARKET_LABELS[r.market] || r.market}</td>
         <td><strong>${pickLabel}</strong></td>
         <td class="odds">${dkOdds}</td>
         <td class="odds" style="color:var(--green)">${fairOdds}</td>
-        <td class="pos">+${(liveEdge * 100).toFixed(1)}%
-          <span class="edge-bar" style="background:var(--green);width:${Math.min(liveEdge * 800, 60)}px"></span></td>
+        <td class="pos">+${(liveEdge * 100).toFixed(1)}%</td>
         <td>${luFlag}</td>
         <td>${(kelly * 100).toFixed(1)}%</td>
       </tr>`;
