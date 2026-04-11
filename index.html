@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>v2 MLB Model Dashboard</title>
+<title>v3.1 MLB Model Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
@@ -52,7 +52,7 @@
 </head>
 <body>
 
-<h1>v2 MLB Model</h1>
+<h1>v3.1 MLB Model</h1>
 <div class="subtitle" id="status-line">Loading...</div>
 
 <div class="grid" id="stats-grid">
@@ -116,6 +116,13 @@
 <div class="section">
   <h2>Performance</h2>
   <div class="chart-container"><canvas id="clv-chart"></canvas></div>
+</div>
+
+<!-- BRIER SCORE CHART -->
+<div class="section">
+  <h2>Prediction Quality (Brier Score)</h2>
+  <div id="brier-stats" style="display:flex;gap:20px;margin-bottom:8px;font-size:0.82rem;color:var(--muted);"></div>
+  <div class="chart-container"><canvas id="brier-chart"></canvas></div>
 </div>
 
 <!-- MARKET BREAKDOWN -->
@@ -477,6 +484,52 @@ async function loadDashboard() {
         }
       }
     });
+  }
+
+  // === BRIER CHART ===
+  if (summary && summary.length > 0) {
+    const brierDays = summary.filter(s => s.brier_model_b != null);
+    if (brierDays.length > 0) {
+      // Compute cumulative Brier
+      let cumModelB = [], cumDK = [], sumB = 0, sumDK = 0, n = 0;
+      brierDays.forEach(s => {
+        sumB += s.brier_model_b;
+        sumDK += (s.brier_dk_open || s.brier_model_b);
+        n++;
+        cumModelB.push(sumB / n);
+        cumDK.push(sumDK / n);
+      });
+      const latestGap = ((cumModelB[cumModelB.length - 1] - cumDK[cumDK.length - 1]) * 10000).toFixed(1);
+      const isAhead = latestGap < 0;
+      document.getElementById('brier-stats').innerHTML =
+        `<span>Model B: <strong>${cumModelB[cumModelB.length - 1].toFixed(6)}</strong></span>` +
+        `<span>DK: <strong>${cumDK[cumDK.length - 1].toFixed(6)}</strong></span>` +
+        `<span>Gap: <strong class="${isAhead ? 'pos' : 'neg'}">${latestGap} bp ${isAhead ? '(AHEAD)' : '(BEHIND)'}</strong></span>` +
+        `<span style="color:var(--muted)">(${brierDays.length} days)</span>`;
+
+      const bCtx = document.getElementById('brier-chart').getContext('2d');
+      new Chart(bCtx, {
+        type: 'line',
+        data: {
+          labels: brierDays.map(s => s.game_date),
+          datasets: [
+            { label: 'Model B (cumulative)', data: cumModelB,
+              borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3, pointRadius: 2 },
+            { label: 'DK (cumulative)', data: cumDK,
+              borderColor: '#ef4444', borderDash: [4,2], fill: false, tension: 0.3, pointRadius: 2 },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: '#8b8fa3', font: { size: 11 } } } },
+          scales: {
+            x: { ticks: { color: '#8b8fa3', font: { size: 10 }, maxTicksLimit: 10 }, grid: { color: '#2a2d37' } },
+            y: { ticks: { color: '#8b8fa3' }, grid: { color: '#2a2d37' },
+                 title: { display: true, text: 'Brier Score (lower is better)', color: '#8b8fa3' } },
+          }
+        }
+      });
+    }
   }
 
   // === MARKET BREAKDOWN ===
