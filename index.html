@@ -357,7 +357,7 @@ async function loadDashboard() {
   }).join('');
 
   // === PITCHER K PROPS ===
-  const { data: props } = await sb.from('prop_predictions').select('*').eq('game_date', today).order('edge_a', { ascending: false });
+  const { data: props } = await sb.from('prop_predictions').select('*').eq('game_date', today).eq('market', 'pitcher_ks').order('edge_a', { ascending: false });
   const propsBody = document.getElementById('props-body');
   if (!props || props.length === 0) {
     document.getElementById('no-props').style.display = 'block';
@@ -424,9 +424,9 @@ async function loadDashboard() {
   }
 
   // === BATTER PROPS ===
-  // Batter props are stored in prop_predictions with market like 'batter_%'
+  const { data: batterData } = await sb.from('prop_predictions').select('*').eq('game_date', today).like('market', 'batter_%').order('edge_a', { ascending: false });
   const batterPropsBody = document.getElementById('batter-props-body');
-  const batterProps = (props || []).filter(p => p.market && p.market.startsWith('batter_'));
+  const batterProps = batterData || [];
   if (batterProps.length === 0) {
     document.getElementById('no-batter-props').style.display = 'block';
   } else {
