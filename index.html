@@ -101,7 +101,7 @@
   <div id="no-props" class="empty" style="display:none;">No pitcher K predictions today.</div>
 </div>
 
-<!-- BATTER PROPS -->
+<!-- BATTER PROPS — disabled pending model audit
 <div class="card">
   <h2>Batter Props</h2>
   <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Model vs market for batter hit/TB props. Only showing edges > 2%.</p>
@@ -111,6 +111,7 @@
   </table>
   <div id="no-batter-props" class="empty" style="display:none;">No batter prop edges today.</div>
 </div>
+-->
 
 <!-- CLV CHART -->
 <div class="section">
@@ -478,10 +479,10 @@ async function loadDashboard() {
     propsBody.innerHTML = propRows.join('');
   }
 
-  // === BATTER PROPS ===
-  const { data: batterData } = await sb.from('prop_predictions').select('*').eq('game_date', today).like('market', 'batter_%').order('edge_a', { ascending: false });
-  const batterPropsBody = document.getElementById('batter-props-body');
-  const batterProps = batterData || [];
+  // === BATTER PROPS — disabled pending model audit ===
+  const batterProps = [];
+  // const { data: batterData } = await sb.from('prop_predictions').select('*').eq('game_date', today).like('market', 'batter_%').order('edge_a', { ascending: false });
+  // const batterProps = batterData || [];
   if (batterProps.length === 0) {
     document.getElementById('no-batter-props').style.display = 'block';
   } else {
