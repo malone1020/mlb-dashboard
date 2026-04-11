@@ -496,6 +496,7 @@ async function loadDashboard() {
   }
 
   // === BATTER PROPS (beta) ===
+  const batterPropsBody = document.getElementById('batter-props-body');
   const { data: batterData } = await sb.from('prop_predictions').select('*').eq('game_date', today).like('market', 'batter_%').order('edge_a', { ascending: false });
   const batterProps = batterData || [];
   if (batterProps.length === 0) {
