@@ -166,7 +166,7 @@ function impliedToAmerican(p) {
 
 // Market display names
 const MARKET_LABELS = {
-  'ml_full': 'ML', 'rl_full': 'RL', 'total_full': 'Total',
+  'ml_full': 'ML', 'rl_full': 'RL', 'rl_alt': 'RL -1', 'total_full': 'Total',
   'ml_f5': 'F5 ML', 'rl_f5': 'F5 RL', 'total_f5': 'F5 Total',
   'team_total_home': 'Team O/U', 'team_total_away': 'Team O/U',
   'nrfi': 'NRFI',
@@ -202,7 +202,11 @@ function formatPick(r) {
   const isHome = r.bet_side === 1 || (r.bet_side === 0 && (r.edge_a || 0) > 0);
   const pickTeam = isHome ? r.home_team : r.away_team;
   let suffix = '';
-  if (mkt === 'rl_full') {
+  if (mkt === 'rl_alt') {
+    // RL -1: home -1.0 or away +1.0
+    const betSpread = isHome ? -1.0 : 1.0;
+    suffix = ` ${betSpread > 0 ? '+' : ''}${betSpread}`;
+  } else if (mkt === 'rl_full') {
     // Spread is stored from home perspective: -1.5 = home fav, +1.5 = home dog
     // Show the spread from the bet side's perspective
     const homeSpread = r.total_line || -1.5;
