@@ -74,7 +74,7 @@
   <h2 id="bets-header">Bets</h2>
   <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Only bets with edge at the current DK price. Filtered out if line moved past fair value.</p>
   <table>
-    <thead><tr><th>Time</th><th>Game</th><th>SPs</th><th>Pick</th><th>DK Line</th><th>Fair</th><th>Edge</th><th>LU</th><th>Kelly</th></tr></thead>
+    <thead><tr><th>Time</th><th>Game</th><th>SPs</th><th>Pick</th><th>DK Line</th><th>Fair</th><th>Edge (open)</th><th>Edge (live)</th><th>LU</th><th>Kelly</th></tr></thead>
     <tbody id="bets-body"></tbody>
   </table>
   <div id="no-bets" class="empty" style="display:none;">No bets firing today. Model sees no edge above threshold.</div>
@@ -85,7 +85,7 @@
   <h2>All Predictions (Today)</h2>
   <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Every game analyzed. Green = bet fires, gray = tracked but no bet.</p>
   <table>
-    <thead><tr><th>Game</th><th>Market</th><th>Lean</th><th>Model</th><th>Market</th><th>Edge</th><th>Status</th></tr></thead>
+    <thead><tr><th>Time</th><th>Game</th><th>SPs</th><th>Pick</th><th>DK Line</th><th>Fair</th><th>Edge (open)</th><th>Edge (live)</th><th>LU</th><th>Status</th></tr></thead>
     <tbody id="all-preds-body"></tbody>
   </table>
 </div>
@@ -323,6 +323,7 @@ async function loadDashboard() {
         timeStr = `${cstH}:${String(m).padStart(2,'0')} ${ampm}`;
       }
 
+      const openEdge = Math.abs(r.edge_a || 0);
       return `<tr>
         <td style="font-size:0.75rem;color:var(--muted)">${timeStr}</td>
         <td>${r.away_team} @ ${r.home_team}</td>
@@ -330,6 +331,7 @@ async function loadDashboard() {
         <td><strong>${pickLabel}</strong></td>
         <td class="odds">${dkOdds}</td>
         <td class="odds" style="color:var(--green)">${fairOdds}</td>
+        <td class="pos">+${(openEdge * 100).toFixed(1)}%</td>
         <td class="pos">+${(liveEdge * 100).toFixed(1)}%</td>
         <td>${luFlag}</td>
         <td>${(kelly * 100).toFixed(1)}%</td>
@@ -342,16 +344,56 @@ async function loadDashboard() {
   allBody.innerHTML = allPreds.sort((a, b) => Math.abs(b.edge_a || 0) - Math.abs(a.edge_a || 0)).map(r => {
     const isBet = r.bet_side !== 0;
     const { pickLabel, ourP, mktP, edge } = formatPick(r);
+    const isHome = r.bet_side === 1 || (r.bet_side === 0 && (r.edge_a || 0) > 0);
     const statusTag = isBet ? '<span class="tag bet">BET</span>' : '<span class="tag shadow">tracking</span>';
-    const edgeColor = edge > 0.02 ? 'var(--green)' : 'var(--muted)';
+
+    // DK price (live, falling back to open)
+    const dkPrice = isHome
+      ? (r.dk_live_home_price || r.dk_open_home_price)
+      : (r.dk_live_away_price || r.dk_open_away_price);
+    const dkOdds = dkPrice ? (dkPrice > 0 ? '+' + dkPrice : '' + dkPrice) : impliedToAmerican(mktP);
+    const fairOdds = impliedToAmerican(ourP);
+
+    // Edge vs open
+    const openEdge = Math.abs(r.edge_a || 0);
+
+    // Edge vs live
+    let liveEdge = openEdge;
+    if (dkPrice != null) {
+      const liveImp = dkPrice < 0
+        ? Math.abs(dkPrice) / (Math.abs(dkPrice) + 100)
+        : 100 / (dkPrice + 100);
+      liveEdge = Math.abs(ourP - liveImp);
+    }
+
+    // SP names
+    const awSP = (r.away_sp_name || '').split(' ').pop() || '?';
+    const hmSP = (r.home_sp_name || '').split(' ').pop() || '?';
+
+    // Game time
+    let timeStr = '--';
+    if (r.commence_time_utc) {
+      const [h, m] = r.commence_time_utc.split(':').map(Number);
+      let cstH = ((h - 6) % 24 + 24) % 24;
+      const ampm = cstH >= 12 ? 'PM' : 'AM';
+      if (cstH > 12) cstH -= 12;
+      if (cstH === 0) cstH = 12;
+      timeStr = `${cstH}:${String(m).padStart(2,'0')} ${ampm}`;
+    }
+
+    const luFlag = r.has_lineup_data ? '<span class="flag ok">LU</span>' : '<span class="flag warn">no LU</span>';
+    const edgeColor = openEdge > 0.02 ? 'var(--green)' : 'var(--muted)';
+
     return `<tr style="opacity:${isBet ? 1 : 0.6}">
+      <td style="font-size:0.75rem;color:var(--muted)">${timeStr}</td>
       <td>${r.away_team} @ ${r.home_team}</td>
-      <td>${MARKET_LABELS[r.market] || r.market}</td>
-      <td>${pickLabel}</td>
-      <td>${pct(ourP)}</td>
-      <td>${pct(mktP)}</td>
-      <td style="color:${edgeColor}">${(edge * 100).toFixed(1)}%
-        <span class="edge-bar" style="background:${edgeColor};width:${Math.min(edge * 800, 50)}px"></span></td>
+      <td style="font-size:0.75rem;color:var(--muted)">${awSP} vs ${hmSP}</td>
+      <td><strong>${pickLabel}</strong></td>
+      <td class="odds">${dkOdds}</td>
+      <td class="odds" style="color:var(--green)">${fairOdds}</td>
+      <td style="color:${edgeColor}">${(openEdge * 100).toFixed(1)}%</td>
+      <td style="color:${edgeColor}">${(liveEdge * 100).toFixed(1)}%</td>
+      <td>${luFlag}</td>
       <td>${statusTag}</td>
     </tr>`;
   }).join('');
