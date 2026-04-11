@@ -74,7 +74,7 @@
   <h2 id="bets-header">Bets</h2>
   <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Only bets with edge at the current DK price. Filtered out if line moved past fair value.</p>
   <table>
-    <thead><tr><th>Game</th><th>SPs</th><th>Market</th><th>Pick</th><th>DK Line</th><th>Fair</th><th>Edge</th><th>LU</th><th>Kelly</th></tr></thead>
+    <thead><tr><th>Time</th><th>Game</th><th>SPs</th><th>Pick</th><th>DK Line</th><th>Fair</th><th>Edge</th><th>LU</th><th>Kelly</th></tr></thead>
     <tbody id="bets-body"></tbody>
   </table>
   <div id="no-bets" class="empty" style="display:none;">No bets firing today. Model sees no edge above threshold.</div>
@@ -302,10 +302,21 @@ async function loadDashboard() {
       const awSP = (r.away_sp_name || '').split(' ').pop() || '?';
       const hmSP = (r.home_sp_name || '').split(' ').pop() || '?';
 
+      // Game time: commence_time_utc is HH:MM:SS in UTC, convert to CST (UTC-6)
+      let timeStr = '--';
+      if (r.commence_time_utc) {
+        const [h, m] = r.commence_time_utc.split(':').map(Number);
+        let cstH = ((h - 6) % 24 + 24) % 24;
+        const ampm = cstH >= 12 ? 'PM' : 'AM';
+        if (cstH > 12) cstH -= 12;
+        if (cstH === 0) cstH = 12;
+        timeStr = `${cstH}:${String(m).padStart(2,'0')} ${ampm}`;
+      }
+
       return `<tr>
+        <td style="font-size:0.75rem;color:var(--muted)">${timeStr}</td>
         <td>${r.away_team} @ ${r.home_team}</td>
         <td style="font-size:0.75rem;color:var(--muted)">${awSP} vs ${hmSP}</td>
-        <td>${MARKET_LABELS[r.market] || r.market}</td>
         <td><strong>${pickLabel}</strong></td>
         <td class="odds">${dkOdds}</td>
         <td class="odds" style="color:var(--green)">${fairOdds}</td>
