@@ -164,8 +164,9 @@ function formatPick(r) {
   if (OVER_UNDER_MARKETS.has(mkt)) {
     // bet_side=+1 means OVER, -1 means UNDER (for totals)
     const teamNote = mkt === 'team_total_home' ? ` (${r.home_team})` : mkt === 'team_total_away' ? ` (${r.away_team})` : '';
-    if (r.bet_side === 1) return { pickLabel: 'OVER' + teamNote, ourP: r.model_a_pred || r.model_b_pred, mktP: r.open_implied_prob, edge: Math.abs(r.edge_a) };
-    if (r.bet_side === -1) return { pickLabel: 'UNDER' + teamNote, ourP: 1 - (r.model_a_pred || r.model_b_pred), mktP: 1 - r.open_implied_prob, edge: Math.abs(r.edge_a) };
+    const lineNum = r.total_line ? ` ${r.total_line}` : '';
+    if (r.bet_side === 1) return { pickLabel: 'Over' + lineNum + teamNote, ourP: r.model_a_pred || r.model_b_pred, mktP: r.open_implied_prob, edge: Math.abs(r.edge_a) };
+    if (r.bet_side === -1) return { pickLabel: 'Under' + lineNum + teamNote, ourP: 1 - (r.model_a_pred || r.model_b_pred), mktP: 1 - r.open_implied_prob, edge: Math.abs(r.edge_a) };
     const lean = (r.edge_a || 0) > 0 ? 'Over' : 'Under';
     return { pickLabel: lean + teamNote, ourP: r.model_a_pred || r.model_b_pred, mktP: r.open_implied_prob, edge: Math.abs(r.edge_a || 0) };
   }
@@ -176,7 +177,16 @@ function formatPick(r) {
   const suffix = mkt.includes('f5') ? ' (F5)' : mkt === 'rl_full' ? ' -1.5' : '';
   const pickLabel = `${pickTeam}${suffix}`;
   const ourP = isHome ? (r.model_a_pred || r.model_b_pred) : 1 - (r.model_a_pred || r.model_b_pred);
-  const mktP = isHome ? r.open_implied_prob : 1 - (r.open_implied_prob || 0);
+  // Use DK price (with vig) for market probability display
+  const dkPrice = isHome
+    ? (r.dk_live_home_price || r.dk_open_home_price)
+    : (r.dk_live_away_price || r.dk_open_away_price);
+  let mktP;
+  if (dkPrice != null) {
+    mktP = dkPrice < 0 ? Math.abs(dkPrice) / (Math.abs(dkPrice) + 100) : 100 / (dkPrice + 100);
+  } else {
+    mktP = isHome ? r.open_implied_prob : 1 - (r.open_implied_prob || 0);
+  }
   return { pickLabel, ourP, mktP, edge: Math.abs(r.edge_a || 0) };
 }
 
