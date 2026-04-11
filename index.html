@@ -257,11 +257,12 @@ async function loadDashboard() {
   // Today's predictions
   const { data: preds } = await sb.from('predictions').select('*').eq('game_date', today).order('edge_a', { ascending: false });
   const nowUTC = new Date();
-  // Filter out games that have already started
+  // Filter out games that started more than 3 hours ago (keep recent for tracking)
   const allPreds = (preds || []).filter(p => {
     if (p.commence_time_utc && p.game_date) {
       const gameStart = new Date(p.game_date + 'T' + p.commence_time_utc + 'Z');
-      if (gameStart < nowUTC) return false;
+      const threeHoursAgo = new Date(nowUTC.getTime() - 3 * 60 * 60 * 1000);
+      if (gameStart < threeHoursAgo) return false;
     }
     return true;
   });
