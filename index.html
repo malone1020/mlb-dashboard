@@ -124,7 +124,11 @@
 const SUPABASE_URL = 'https://naaglfmoynwovqdqtflk.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5hYWdsZm1veW53b3ZxZHF0ZmxrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3OTM4NDMsImV4cCI6MjA5MTM2OTg0M30.cW67tw1UjulO9DyNHN8ejsD2K7KHdBQJ_8AVzXf2PUY';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const today = new Date().toISOString().split('T')[0];
+// Use ET date (UTC-4 during EDT), with URL override: ?date=2026-04-11
+const urlDate = new URLSearchParams(window.location.search).get('date');
+const etNow = new Date(Date.now() - 4 * 3600 * 1000);
+const today = urlDate || etNow.toISOString().split('T')[0];
+document.title = `MLB Model — ${today}`;
 
 function pct(v) { return v != null ? (v * 100).toFixed(1) + '%' : '--'; }
 function pp(v) { return v != null ? (v > 0 ? '+' : '') + v.toFixed(2) : '--'; }
