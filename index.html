@@ -62,9 +62,16 @@
   <div class="stat-card"><div class="value" id="stat-gate">--</div><div class="label">Gate Status</div></div>
 </div>
 
+<!-- DATE TOGGLE -->
+<div style="margin:12px 0; display:flex; gap:8px; align-items:center;">
+  <button id="btn-today" onclick="switchDate('today')" style="padding:6px 16px; border-radius:6px; border:1px solid var(--border); cursor:pointer;">Today</button>
+  <button id="btn-tomorrow" onclick="switchDate('tomorrow')" style="padding:6px 16px; border-radius:6px; border:1px solid var(--border); cursor:pointer;">Tomorrow</button>
+  <span id="date-label" style="color:var(--muted); font-size:0.85rem; margin-left:8px;"></span>
+</div>
+
 <!-- BET CARD: only rows where bet_side != 0 -->
 <div class="section">
-  <h2>Today's Bets</h2>
+  <h2 id="bets-header">Bets</h2>
   <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Only bets with edge at the current DK price. Filtered out if line moved past fair value.</p>
   <table>
     <thead><tr><th>Game</th><th>Market</th><th>Pick</th><th>DK Line</th><th>Fair</th><th>Edge</th><th>LU</th><th>Kelly</th></tr></thead>
@@ -124,11 +131,24 @@
 const SUPABASE_URL = 'https://naaglfmoynwovqdqtflk.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5hYWdsZm1veW53b3ZxZHF0ZmxrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3OTM4NDMsImV4cCI6MjA5MTM2OTg0M30.cW67tw1UjulO9DyNHN8ejsD2K7KHdBQJ_8AVzXf2PUY';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-// Use ET date (UTC-4 during EDT), with URL override: ?date=2026-04-11
-const urlDate = new URLSearchParams(window.location.search).get('date');
+// Date handling: ET timezone, toggle between today/tomorrow
 const etNow = new Date(Date.now() - 4 * 3600 * 1000);
-const today = urlDate || etNow.toISOString().split('T')[0];
-document.title = `MLB Model — ${today}`;
+const etToday = etNow.toISOString().split('T')[0];
+const etTomorrow = new Date(etNow.getTime() + 86400000).toISOString().split('T')[0];
+const urlDate = new URLSearchParams(window.location.search).get('date');
+let today = urlDate || etToday;
+
+function switchDate(which) {
+  today = which === 'tomorrow' ? etTomorrow : etToday;
+  document.getElementById('btn-today').style.background = which === 'today' ? 'var(--green)' : '';
+  document.getElementById('btn-today').style.color = which === 'today' ? '#fff' : '';
+  document.getElementById('btn-tomorrow').style.background = which === 'tomorrow' ? 'var(--green)' : '';
+  document.getElementById('btn-tomorrow').style.color = which === 'tomorrow' ? '#fff' : '';
+  document.getElementById('date-label').textContent = today;
+  document.getElementById('bets-header').textContent = which === 'tomorrow' ? "Tomorrow's Bets" : "Today's Bets";
+  document.title = `MLB Model — ${today}`;
+  loadDashboard();
+}
 
 function pct(v) { return v != null ? (v * 100).toFixed(1) + '%' : '--'; }
 function pp(v) { return v != null ? (v > 0 ? '+' : '') + v.toFixed(2) : '--'; }
@@ -473,7 +493,8 @@ function timeAgo(d) {
   return `${Math.floor(mins / 1440)}d ago`;
 }
 
-loadDashboard();
+// Initialize: default to today, highlight button
+switchDate(today === etTomorrow ? 'tomorrow' : 'today');
 setInterval(loadDashboard, 300000);
 </script>
 </body>
