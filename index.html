@@ -220,7 +220,8 @@ function formatPick(r) {
     suffix = ' (F5)';
   }
   const pickLabel = `${pickTeam}${suffix}`;
-  const ourP = isHome ? (r.model_a_pred || r.model_b_pred) : 1 - (r.model_a_pred || r.model_b_pred);
+  const modelP = r.model_b_pred || r.model_a_pred;  // prefer model_b (outcome model)
+  const ourP = isHome ? modelP : 1 - modelP;
   // Use DK price (with vig) for market probability display
   const dkPrice = isHome
     ? (r.dk_live_home_price || r.dk_open_home_price)
@@ -231,7 +232,7 @@ function formatPick(r) {
   } else {
     mktP = isHome ? r.open_implied_prob : 1 - (r.open_implied_prob || 0);
   }
-  return { pickLabel, ourP, mktP, edge: Math.abs(r.edge_a || 0) };
+  return { pickLabel, ourP, mktP, edge: Math.abs(r.edge_b || r.edge_a || 0) };
 }
 
 // Sortable table columns: click header to sort
@@ -283,37 +284,65 @@ async function loadDashboard() {
   }
 
   // Today's predictions
-  const { data: preds } = await sb.from('predictions').select('*').eq('game_date', today).order('edge_a', { ascending: false });
+  const { data: preds } = await sb.from('predictions').select('*').eq('game_date', today).order('edge_b', { ascending: false });
   const nowUTC = new Date();
-  // Filter out games that started more than 3 hours ago (keep recent for tracking)
+  // Build started-teams set so K props and batter props can be filtered
+  const startedTeams = new Set();
+  (preds || []).forEach(p => {
+    if (p.commence_time_utc && p.game_date) {
+      let gs = new Date(p.game_date + 'T' + p.commence_time_utc + 'Z');
+      if (gs.getUTCHours() < 12) gs = new Date(gs.getTime() + 86400000);
+      if (gs <= nowUTC) {
+        if (p.away_team) startedTeams.add(p.away_team);
+        if (p.home_team) startedTeams.add(p.home_team);
+      }
+    }
+  });
+  // Only show games that haven't started yet
   const allPreds = (preds || []).filter(p => {
     if (p.commence_time_utc && p.game_date) {
       let gameStart = new Date(p.game_date + 'T' + p.commence_time_utc + 'Z');
       // Late-night games (UTC hour < 12) are actually the next UTC day
-      // e.g. game_date=2026-04-11, commence=00:40:00Z = Apr 12 00:40 UTC
-      if (gameStart.getUTCHours() < 12) {
-        gameStart = new Date(gameStart.getTime() + 24 * 60 * 60 * 1000);
-      }
-      const threeHoursAgo = new Date(nowUTC.getTime() - 3 * 60 * 60 * 1000);
-      if (gameStart < threeHoursAgo) return false;
+      if (gameStart.getUTCHours() < 12) gameStart = new Date(gameStart.getTime() + 86400000);
+      if (gameStart <= nowUTC) return false;
     }
     return true;
   });
-  // Filter bets: only show if edge still exists at current (live) price
+  // Filter bets: only show if live edge ≥ 3% against the BET SIDE's price.
+  // For home bets: modelP vs home price. For away bets: (1-modelP) vs away price.
+  // This avoids the vig-asymmetry bug where |modelP - homeImp| masks negative away edges.
+  function calcLiveEdgeSigned(p) {
+    const modelP = p.model_b_pred || p.model_a_pred;
+    if (modelP == null) return null;
+    const toImp = pr => pr < 0 ? Math.abs(pr) / (Math.abs(pr) + 100) : 100 / (pr + 100);
+    if (p.bet_side === 1) {
+      const price = p.dk_live_home_price || p.dk_open_home_price;
+      if (price == null) return null;
+      return modelP - toImp(price);  // positive = home has edge
+    } else {
+      // Try explicit away price first
+      const awayPrice = p.dk_live_away_price || p.dk_open_away_price;
+      if (awayPrice != null) {
+        return (1 - modelP) - toImp(awayPrice);  // positive = away has edge
+      }
+      // No away price stored — estimate via complement of home price (no vig removal, conservative)
+      // e.g. YRFI: model NRFI=45%, home line +112 → homeImp=47.2% → away edge = 55% - 52.8% = +2.2%
+      const homePrice = p.dk_live_home_price || p.dk_open_home_price;
+      if (homePrice != null) {
+        return (1 - modelP) - (1 - toImp(homePrice));  // = toImp(homePrice) - modelP
+      }
+      return null;
+    }
+  }
   const bets = allPreds.filter(p => {
     if (p.bet_side === 0) return false;
-    // Minimum 3% edge at open to show in Today's Bets
-    if (Math.abs(p.edge_a || 0) < 0.03) return false;
-    // Check if live price exists and edge is still positive
-    // Use model_b_pred (outcome model — our production signal)
-    const modelP = p.model_b_pred || p.model_a_pred;
-    if (p.dk_live_home_price != null && modelP != null && (p.market === 'ml_full' || p.market === 'ml_f5')) {
-      const liveHomeImp = p.dk_live_home_price < 0
-        ? Math.abs(p.dk_live_home_price) / (Math.abs(p.dk_live_home_price) + 100)
-        : 100 / (p.dk_live_home_price + 100);
-      const liveEdge = modelP - liveHomeImp;
-      if (p.bet_side === 1 && liveEdge <= 0) return false;
-      if (p.bet_side === -1 && liveEdge >= 0) return false;
+    const signedEdge = calcLiveEdgeSigned(p);
+    if (signedEdge !== null) {
+      if (signedEdge <= 0) return false;          // edge gone or flipped
+      if (signedEdge < 0.03) return false;        // below 3% threshold
+    } else {
+      // No live price — fall back to stored edge_b (open edge)
+      if (Math.abs(p.edge_b || p.edge_a || 0) < 0.03) return false;
     }
     return true;
   });
@@ -324,22 +353,14 @@ async function loadDashboard() {
     document.getElementById('no-bets').style.display = 'block';
   } else {
     document.getElementById('no-bets').style.display = 'none';
-    // Sort by live edge (recalculated against current DK price)
+    // Sort by live edge — use bet-side-aware signed edge (same as filter)
     function getLiveEdge(r) {
-      const { ourP } = formatPick(r);
-      const isHome = r.bet_side === 1 || (r.bet_side === 0 && (r.edge_a || 0) > 0);
-      const dkPrice = isHome
-        ? (r.dk_live_home_price || r.dk_open_home_price)
-        : (r.dk_live_away_price || r.dk_open_away_price);
-      if (dkPrice != null) {
-        const liveImp = dkPrice < 0 ? Math.abs(dkPrice) / (Math.abs(dkPrice) + 100) : 100 / (dkPrice + 100);
-        return Math.abs(ourP - liveImp);
-      }
-      return Math.abs(r.edge_a || 0);
+      const e = calcLiveEdgeSigned(r);
+      return e !== null ? Math.max(e, 0) : Math.abs(r.edge_b || r.edge_a || 0);
     }
     betsBody.innerHTML = bets.sort((a, b) => getLiveEdge(b) - getLiveEdge(a)).map(r => {
       const { pickLabel, ourP, mktP, edge } = formatPick(r);
-      const isHome = r.bet_side === 1 || (r.bet_side === 0 && (r.edge_a || 0) > 0);
+      const isHome = r.bet_side === 1 || (r.bet_side === 0 && (r.edge_b || r.edge_a || 0) > 0);
 
       // Current DK price (live, falling back to open)
       const dkPrice = isHome
@@ -351,14 +372,9 @@ async function loadDashboard() {
       const fairP = ourP;
       const fairOdds = impliedToAmerican(fairP);
 
-      // Recalculate edge against live price
-      let liveEdge = edge;
-      if (dkPrice != null) {
-        const liveImp = dkPrice < 0
-          ? Math.abs(dkPrice) / (Math.abs(dkPrice) + 100)
-          : 100 / (dkPrice + 100);
-        liveEdge = Math.abs(ourP - liveImp);
-      }
+      // Live edge: bet-side-aware (away bets use away price, not home price)
+      const signedEdge = calcLiveEdgeSigned(r);
+      const liveEdge = signedEdge !== null ? Math.max(signedEdge, 0) : edge;
 
       // Kelly against current price
       const liveMktP = dkPrice != null
@@ -387,7 +403,7 @@ async function loadDashboard() {
         timeStr = `${cstH}:${String(m).padStart(2,'0')} ${ampm}`;
       }
 
-      const openEdge = Math.abs(r.edge_a || 0);
+      const openEdge = Math.abs(r.edge_b || r.edge_a || 0);
       return `<tr>
         <td style="font-size:0.75rem;color:var(--muted)">${timeStr}</td>
         <td>${r.away_team} @ ${r.home_team}</td>
@@ -405,7 +421,12 @@ async function loadDashboard() {
 
   // === ALL PREDICTIONS (every game, for context) ===
   const allBody = document.getElementById('all-preds-body');
-  allBody.innerHTML = allPreds.sort((a, b) => Math.abs(b.edge_a || 0) - Math.abs(a.edge_a || 0)).map(r => {
+  allBody.innerHTML = allPreds.sort((a, b) => {
+    const la = calcLiveEdgeSigned(a), lb = calcLiveEdgeSigned(b);
+    const ea = la !== null ? Math.max(la, 0) : Math.abs(a.edge_b || a.edge_a || 0);
+    const eb = lb !== null ? Math.max(lb, 0) : Math.abs(b.edge_b || b.edge_a || 0);
+    return eb - ea;
+  }).map(r => {
     const isBet = r.bet_side !== 0;
     const { pickLabel, ourP, mktP, edge } = formatPick(r);
     const isHome = r.bet_side === 1 || (r.bet_side === 0 && (r.edge_a || 0) > 0);
@@ -421,14 +442,9 @@ async function loadDashboard() {
     // Edge vs open
     const openEdge = Math.abs(r.edge_a || 0);
 
-    // Edge vs live
-    let liveEdge = openEdge;
-    if (dkPrice != null) {
-      const liveImp = dkPrice < 0
-        ? Math.abs(dkPrice) / (Math.abs(dkPrice) + 100)
-        : 100 / (dkPrice + 100);
-      liveEdge = Math.abs(ourP - liveImp);
-    }
+    // Edge vs live — bet-side-aware
+    const _signedEdge = calcLiveEdgeSigned(r);
+    const liveEdge = _signedEdge !== null ? Math.max(_signedEdge, 0) : openEdge;
 
     // SP names
     const awSP = (r.away_sp_name || '').split(' ').pop() || '?';
@@ -465,12 +481,13 @@ async function loadDashboard() {
   // === PITCHER K PROPS ===
   const { data: props } = await sb.from('prop_predictions').select('*').eq('game_date', today).eq('market', 'pitcher_ks').order('edge_a', { ascending: false });
   const propsBody = document.getElementById('props-body');
-  if (!props || props.length === 0) {
+  const notStartedProps = (props || []).filter(p => !p.team || !startedTeams.has(p.team));
+  if (notStartedProps.length === 0) {
     document.getElementById('no-props').style.display = 'block';
   } else {
     // Two rows per pitcher: OVER and UNDER with edges computed from vig-adjusted prices
     const propRows = [];
-    props.sort((a, b) => Math.abs(b.edge_a || 0) - Math.abs(a.edge_a || 0)).forEach(p => {
+    notStartedProps.sort((a, b) => Math.abs(b.edge_b || b.edge_a || 0) - Math.abs(a.edge_b || a.edge_a || 0)).forEach(p => {
       const modelOver = p.pred_a;
       const modelUnder = modelOver != null ? 1 - modelOver : null;
       const mktOver = p.open_over_implied;
@@ -548,7 +565,7 @@ async function loadDashboard() {
       'batter_hits_runs_rbis': 'H+R+RBI',
     };
     const filtered = batterProps
-      .filter(p => Math.abs(p.edge_a || 0) > 0.05)
+      .filter(p => (!p.team || !startedTeams.has(p.team)) && Math.abs(p.edge_a || 0) > 0.05)
       .sort((a, b) => Math.abs(b.edge_a || 0) - Math.abs(a.edge_a || 0));
     if (filtered.length === 0) {
       document.getElementById('no-batter-props').style.display = 'block';
