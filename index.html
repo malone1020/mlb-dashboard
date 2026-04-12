@@ -260,7 +260,12 @@ async function loadDashboard() {
   // Filter out games that started more than 3 hours ago (keep recent for tracking)
   const allPreds = (preds || []).filter(p => {
     if (p.commence_time_utc && p.game_date) {
-      const gameStart = new Date(p.game_date + 'T' + p.commence_time_utc + 'Z');
+      let gameStart = new Date(p.game_date + 'T' + p.commence_time_utc + 'Z');
+      // Late-night games (UTC hour < 12) are actually the next UTC day
+      // e.g. game_date=2026-04-11, commence=00:40:00Z = Apr 12 00:40 UTC
+      if (gameStart.getUTCHours() < 12) {
+        gameStart = new Date(gameStart.getTime() + 24 * 60 * 60 * 1000);
+      }
       const threeHoursAgo = new Date(nowUTC.getTime() - 3 * 60 * 60 * 1000);
       if (gameStart < threeHoursAgo) return false;
     }
