@@ -27,7 +27,9 @@
   .pos { color: var(--green); } .neg { color: var(--red); } .neutral { color: var(--yellow); }
   .section { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
   table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
+  th:hover { color: var(--green); }
+  th .sort-arrow { font-size: 0.6rem; margin-left: 2px; }
   td { padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   tr:hover { background: rgba(59,130,246,0.05); }
   .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; }
@@ -230,6 +232,32 @@ function formatPick(r) {
     mktP = isHome ? r.open_implied_prob : 1 - (r.open_implied_prob || 0);
   }
   return { pickLabel, ourP, mktP, edge: Math.abs(r.edge_a || 0) };
+}
+
+// Sortable table columns: click header to sort
+function makeSortable(tbodyId) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  const table = tbody.closest('table');
+  const headers = table.querySelectorAll('th');
+  let sortCol = -1, sortAsc = true;
+  headers.forEach((th, idx) => {
+    th.addEventListener('click', () => {
+      if (sortCol === idx) { sortAsc = !sortAsc; } else { sortCol = idx; sortAsc = false; }
+      headers.forEach(h => { const a = h.querySelector('.sort-arrow'); if (a) a.remove(); });
+      th.insertAdjacentHTML('beforeend', `<span class="sort-arrow">${sortAsc ? '▲' : '▼'}</span>`);
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      rows.sort((a, b) => {
+        const aText = a.cells[idx]?.textContent?.trim() || '';
+        const bText = b.cells[idx]?.textContent?.trim() || '';
+        const aNum = parseFloat(aText.replace(/[^0-9.\-]/g, ''));
+        const bNum = parseFloat(bText.replace(/[^0-9.\-]/g, ''));
+        if (!isNaN(aNum) && !isNaN(bNum)) return sortAsc ? aNum - bNum : bNum - aNum;
+        return sortAsc ? aText.localeCompare(bText) : bText.localeCompare(aText);
+      });
+      rows.forEach(r => tbody.appendChild(r));
+    });
+  });
 }
 
 async function loadDashboard() {
@@ -641,6 +669,12 @@ async function loadDashboard() {
         <td>${wr != null ? (wr * 100).toFixed(0) + '%' : '--'}</td></tr>`;
     }).join('');
   }
+
+  // Make all tables sortable by clicking column headers
+  makeSortable('bets-body');
+  makeSortable('all-preds-body');
+  makeSortable('props-body');
+  makeSortable('batter-props-body');
 }
 
 function timeAgo(d) {
