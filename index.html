@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>v3.1 MLB Model Dashboard</title>
+<title>MLB Model Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
@@ -40,21 +40,37 @@
   .flag { font-size: 0.7rem; padding: 1px 5px; border-radius: 3px; }
   .flag.ok { background: rgba(34,197,94,0.15); color: var(--green); }
   .flag.warn { background: rgba(239,68,68,0.15); color: var(--red); }
+  .flag.muted { background: rgba(139,143,163,0.15); color: var(--muted); }
   .edge-bar { display: inline-block; height: 6px; border-radius: 3px; min-width: 4px; vertical-align: middle; margin-left: 4px; }
   .chart-container { height: 200px; margin-top: 8px; }
   .empty { padding: 20px; text-align: center; color: var(--muted); }
   .odds { font-family: monospace; font-size: 0.8rem; }
+  /* Tabs */
+  .tab-bar { display: flex; gap: 4px; margin-bottom: 0; border-bottom: 1px solid var(--border); }
+  .tab-btn { padding: 8px 16px; background: none; border: none; border-bottom: 2px solid transparent;
+             color: var(--muted); font-size: 0.85rem; cursor: pointer; margin-bottom: -1px; transition: all 0.15s; }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--green); border-bottom-color: var(--green); font-weight: 500; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  /* Market breakdown inline */
+  .mkt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin-bottom: 16px; }
+  .mkt-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .mkt-card .mkt-name { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .mkt-card .mkt-clv { font-size: 1.1rem; font-weight: 700; margin: 2px 0; }
+  .mkt-card .mkt-detail { font-size: 0.72rem; color: var(--muted); }
   @media (max-width: 600px) {
     body { padding: 8px; }
     .grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
     table { font-size: 0.75rem; }
     td, th { padding: 4px 4px; }
+    .tab-btn { padding: 6px 10px; font-size: 0.78rem; }
   }
 </style>
 </head>
 <body>
 
-<h1>v3.1 MLB Model</h1>
+<h1 id="model-title">MLB Model</h1>
 <div class="subtitle" id="status-line">Loading...</div>
 
 <div class="grid" id="stats-grid">
@@ -71,69 +87,84 @@
   <span id="date-label" style="color:var(--muted); font-size:0.85rem; margin-left:8px;"></span>
 </div>
 
-<!-- BET CARD: only rows where bet_side != 0 -->
+<!-- BET CARD: only bets with kelly > 0 -->
 <div class="section">
-  <h2 id="bets-header">Bets</h2>
+  <h2 id="bets-header">Today's Bets</h2>
   <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Only bets with edge at the current DK price. Filtered out if line moved past fair value.</p>
   <table>
-    <thead><tr><th>Time</th><th>Game</th><th>SPs</th><th>Pick</th><th>DK Line</th><th>Fair</th><th>Edge (open)</th><th>Edge (live)</th><th>LU</th><th>Kelly</th></tr></thead>
+    <thead><tr><th>Time</th><th>Game</th><th>SPs</th><th>Pick</th><th>DK</th><th>Best</th><th>Fair</th><th>Edge (open)</th><th>Edge (live)</th><th>LU</th><th>Kelly</th></tr></thead>
     <tbody id="bets-body"></tbody>
   </table>
   <div id="no-bets" class="empty" style="display:none;">No bets firing today. Model sees no edge above threshold.</div>
 </div>
 
-<!-- ALL PREDICTIONS: show everything for context -->
-<div class="section">
-  <h2>All Predictions (Today)</h2>
-  <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Every game analyzed. Green = bet fires, gray = tracked but no bet.</p>
-  <table>
-    <thead><tr><th>Time</th><th>Game</th><th>SPs</th><th>Pick</th><th>DK Line</th><th>Fair</th><th>Edge (open)</th><th>Edge (live)</th><th>LU</th><th>Status</th></tr></thead>
-    <tbody id="all-preds-body"></tbody>
-  </table>
+<!-- MARKET BREAKDOWN (season cards) -->
+<div id="mkt-cards" class="mkt-grid"></div>
+
+<!-- TABS -->
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('predictions')">All Predictions</button>
+  <button class="tab-btn" onclick="switchTab('kprops')">SP K Props</button>
+  <button class="tab-btn" onclick="switchTab('batter')">Batter Props</button>
+  <button class="tab-btn" onclick="switchTab('perf')">Performance</button>
 </div>
 
-<!-- PITCHER K PROPS -->
-<div class="section">
-  <h2>Pitcher K Props</h2>
-  <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Model probability vs DK line for both Over and Under. Edge accounts for vig on each side.</p>
-  <table>
-    <thead><tr><th>Pitcher</th><th>Team</th><th>vs</th><th>Line</th><th>Side</th><th>DK Odds</th><th>DK Imp%</th><th>Model%</th><th>Edge</th><th>Data</th></tr></thead>
-    <tbody id="props-body"></tbody>
-  </table>
-  <div id="no-props" class="empty" style="display:none;">No pitcher K predictions today.</div>
+<!-- TAB: All Predictions -->
+<div id="tab-predictions" class="tab-panel active">
+  <div class="section" style="border-top:none;border-radius:0 0 8px 8px;">
+    <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Every game analyzed. Green = bet fires, gray = tracked but no bet.</p>
+    <table>
+      <thead><tr><th>Time</th><th>Game</th><th>SPs</th><th>Pick</th><th>DK</th><th>Best</th><th>Fair</th><th>Edge (open)</th><th>Edge (live)</th><th>LU</th><th>Status</th></tr></thead>
+      <tbody id="all-preds-body"></tbody>
+    </table>
+  </div>
+  <div class="section">
+    <h2>Cross-Market Signals <span style="font-size:0.7rem;color:var(--orange);font-weight:normal">(NegBin distributional scanner)</span></h2>
+    <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Games where ML + total + RL are inconsistent with a single run distribution. High conviction: all 3 markets agree. Backtested RL hit rate 73-79% at high conviction (2022-2025).</p>
+    <table>
+      <thead><tr><th>Game</th><th>Conv</th><th>NB ML%</th><th>Mkt ML%</th><th>E(ML)</th><th>NB Tot</th><th>Mkt Tot</th><th>E(Tot)</th><th>NB RL%</th><th>Mkt RL%</th><th>E(RL)</th><th>Agree</th><th>μH/μA</th></tr></thead>
+      <tbody id="cms-body"></tbody>
+    </table>
+    <div id="no-cms" class="empty" style="display:none;">No cross-market signals today.</div>
+  </div>
 </div>
 
-<!-- BATTER PROPS -->
-<div class="card">
-  <h2>Batter Props <span style="font-size:0.7rem;color:var(--orange);font-weight:normal">(BETA — line mapping under review)</span></h2>
-  <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Model vs market for batter hit/TB props. Only showing edges > 5%.</p>
-  <table>
-    <thead><tr><th>Batter</th><th>vs SP</th><th>Market</th><th>Line</th><th>DK Imp%</th><th>Model%</th><th>Edge</th><th>Side</th></tr></thead>
-    <tbody id="batter-props-body"></tbody>
-  </table>
-  <div id="no-batter-props" class="empty" style="display:none;">No batter prop edges today.</div>
+<!-- TAB: SP K Props -->
+<div id="tab-kprops" class="tab-panel">
+  <div class="section" style="border-top:none;border-radius:0 0 8px 8px;">
+    <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Model probability vs DK line for both Over and Under. Edge accounts for vig on each side.</p>
+    <table>
+      <thead><tr><th>Pitcher</th><th>Team</th><th>vs</th><th>Line</th><th>Side</th><th>DK Odds</th><th>DK Imp%</th><th>Model%</th><th>Edge</th><th>Data</th></tr></thead>
+      <tbody id="props-body"></tbody>
+    </table>
+    <div id="no-props" class="empty" style="display:none;">No pitcher K predictions today.</div>
+  </div>
 </div>
 
-<!-- CLV CHART -->
-<div class="section">
-  <h2>Performance</h2>
-  <div class="chart-container"><canvas id="clv-chart"></canvas></div>
+<!-- TAB: Batter Props -->
+<div id="tab-batter" class="tab-panel">
+  <div class="section" style="border-top:none;border-radius:0 0 8px 8px;">
+    <h2 style="margin-bottom:8px;">Batter Props <span style="font-size:0.7rem;color:var(--orange);font-weight:normal">(BETA — line mapping under review)</span></h2>
+    <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">Model vs market for batter hit/TB props. Only showing edges > 5%.</p>
+    <table>
+      <thead><tr><th>Batter</th><th>vs SP</th><th>Market</th><th>Line</th><th>DK Imp%</th><th>Model%</th><th>Edge</th><th>Side</th><th>Kelly</th></tr></thead>
+      <tbody id="batter-props-body"></tbody>
+    </table>
+    <div id="no-batter-props" class="empty" style="display:none;">No batter prop edges today.</div>
+  </div>
 </div>
 
-<!-- BRIER SCORE CHART -->
-<div class="section">
-  <h2>Prediction Quality (Brier Score)</h2>
-  <div id="brier-stats" style="display:flex;gap:20px;margin-bottom:8px;font-size:0.82rem;color:var(--muted);"></div>
-  <div class="chart-container"><canvas id="brier-chart"></canvas></div>
-</div>
-
-<!-- MARKET BREAKDOWN -->
-<div class="section">
-  <h2>Market Breakdown (Season)</h2>
-  <table>
-    <thead><tr><th>Market</th><th>Bets</th><th>Mean CLV</th><th>Win Rate</th></tr></thead>
-    <tbody id="market-body"></tbody>
-  </table>
+<!-- TAB: Performance -->
+<div id="tab-perf" class="tab-panel">
+  <div class="section" style="border-top:none;border-radius:0 0 8px 8px;">
+    <h2>CLV Over Time</h2>
+    <div class="chart-container"><canvas id="clv-chart"></canvas></div>
+  </div>
+  <div class="section">
+    <h2>Prediction Quality (Brier Score)</h2>
+    <div id="brier-stats" style="display:flex;gap:20px;margin-bottom:8px;font-size:0.82rem;color:var(--muted);"></div>
+    <div class="chart-container"><canvas id="brier-chart"></canvas></div>
+  </div>
 </div>
 
 <script>
@@ -160,6 +191,15 @@ function switchDate(which) {
 }
 
 function pct(v) { return v != null ? (v * 100).toFixed(1) + '%' : '--'; }
+
+function formatBestLine(dkPrice, bestPrice, bestBook) {
+  if (!bestPrice || !bestBook) return '<span style="color:var(--muted)">—</span>';
+  const bestOdds = bestPrice > 0 ? '+' + bestPrice : '' + bestPrice;
+  // Better than DK if bestPrice > dkPrice (higher American odds = more favorable)
+  const isBetter = dkPrice == null || bestPrice > dkPrice;
+  const color = isBetter ? 'var(--green)' : 'var(--muted)';
+  return `<span style="color:${color}">${bestOdds} <span style="font-size:0.7rem">${bestBook}</span></span>`;
+}
 function pp(v) { return v != null ? (v > 0 ? '+' : '') + v.toFixed(2) : '--'; }
 function impliedToAmerican(p) {
   if (!p || p <= 0 || p >= 1) return '--';
@@ -192,12 +232,12 @@ function formatPick(r) {
 
   if (OVER_UNDER_MARKETS.has(mkt)) {
     // bet_side=+1 means OVER, -1 means UNDER (for totals)
-    const teamNote = mkt === 'team_total_home' ? ` (${r.home_team})` : mkt === 'team_total_away' ? ` (${r.away_team})` : '';
+    const teamNote = mkt === 'team_total_home' ? ` (${r.home_team})` : mkt === 'team_total_away' ? ` (${r.away_team})` : mkt === 'total_f5' ? ' (F5)' : '';
     const lineNum = r.total_line ? ` ${r.total_line}` : '';
     if (r.bet_side === 1) return { pickLabel: 'Over' + lineNum + teamNote, ourP: r.model_a_pred || r.model_b_pred, mktP: r.open_implied_prob, edge: Math.abs(r.edge_a) };
     if (r.bet_side === -1) return { pickLabel: 'Under' + lineNum + teamNote, ourP: 1 - (r.model_a_pred || r.model_b_pred), mktP: 1 - r.open_implied_prob, edge: Math.abs(r.edge_a) };
     const lean = (r.edge_a || 0) > 0 ? 'Over' : 'Under';
-    return { pickLabel: lean + teamNote, ourP: r.model_a_pred || r.model_b_pred, mktP: r.open_implied_prob, edge: Math.abs(r.edge_a || 0) };
+    return { pickLabel: lean + lineNum + teamNote, ourP: r.model_a_pred || r.model_b_pred, mktP: r.open_implied_prob, edge: Math.abs(r.edge_a || 0) };
   }
 
   // ML / RL markets — team-side bets
@@ -271,20 +311,21 @@ async function loadDashboard() {
     clvEl.className = 'value ' + (status.mean_clv_pp > 0 ? 'pos' : status.mean_clv_pp < 0 ? 'neg' : '');
     document.getElementById('stat-gate').textContent = status.gate_status?.toUpperCase() || '--';
     document.getElementById('stat-gate').className = 'value ' + (status.gate_status === 'PASS' ? 'pos' : status.gate_status === 'FAIL' ? 'neg' : 'neutral');
+    if (status.model_version) document.getElementById('model-title').textContent = status.model_version + ' MLB Model';
     const ago = status.last_run ? timeAgo(new Date(status.last_run)) : 'never';
     document.getElementById('status-line').textContent =
       `${status.model_version} | ${status.feature_count} features | Last run: ${ago} | ${status.total_bets}/${status.gate_bets_needed + status.total_bets} bets to gate`;
   }
 
   // Win rate
-  const { data: settledBets } = await sb.from('predictions').select('bet_side, actual_home_win').not('settled_at', 'is', null).neq('bet_side', 0);
+  const { data: settledBets } = await sb.from('predictions').select('bet_side, actual_home_win, kelly_fraction').not('settled_at', 'is', null).gt('kelly_fraction', 0);
   if (settledBets && settledBets.length > 0) {
     const wins = settledBets.filter(b => (b.bet_side === 1 && b.actual_home_win === 1) || (b.bet_side === -1 && b.actual_home_win === 0)).length;
     document.getElementById('stat-wr').textContent = (wins / settledBets.length * 100).toFixed(0) + '%';
   }
 
   // Today's predictions
-  const { data: preds } = await sb.from('predictions').select('*').eq('game_date', today).order('edge_b', { ascending: false });
+  const { data: preds } = await sb.from('predictions').select('*, market_signal_agree, agree_multiplier, trap_flag').eq('game_date', today).order('edge_b', { ascending: false });
   const nowUTC = new Date();
   // Build started-teams set so K props and batter props can be filtered
   const startedTeams = new Set();
@@ -388,6 +429,19 @@ async function loadDashboard() {
       // Lineup flag
       const luFlag = r.has_lineup_data ? '<span class="flag ok">LU</span>' : '<span class="flag warn">no LU</span>';
 
+      // Model A agreement signal
+      const agreeVal = r.market_signal_agree;
+      const trapVal = r.trap_flag;
+      let signalBadge = '';
+      if (trapVal === 1) {
+        signalBadge = '<span class="flag warn" title="Trap cell: medium edge + strong A signal + agree. Downweighted 0.5x. Backtest: -1.1 to -1.4pp CLV">⚠ trap</span>';
+      } else if (agreeVal === 1) {
+        const mult = r.agree_multiplier != null ? r.agree_multiplier.toFixed(1) + 'x' : '1.0x';
+        signalBadge = `<span class="flag ok" title="Model A (market signal) agrees with Model B direction. Backtest agree CLV: +0.89pp">A✓</span>`;
+      } else if (agreeVal === 0) {
+        signalBadge = '<span class="flag muted" title="Model A (market signal) disagrees. Stake halved (0.5x). Backtest disagree CLV: +0.08pp">A✗</span>';
+      }
+
       // SP names (last names only for space)
       const awSP = (r.away_sp_name || '').split(' ').pop() || '?';
       const hmSP = (r.home_sp_name || '').split(' ').pop() || '?';
@@ -403,6 +457,9 @@ async function loadDashboard() {
         timeStr = `${cstH}:${String(m).padStart(2,'0')} ${ampm}`;
       }
 
+      // Best available line (non-DK)
+      const bestCell = formatBestLine(r.dk_bet_price || dkPrice, r.best_bet_price, r.best_bet_book);
+
       const openEdge = Math.abs(r.edge_b || r.edge_a || 0);
       return `<tr>
         <td style="font-size:0.75rem;color:var(--muted)">${timeStr}</td>
@@ -410,10 +467,11 @@ async function loadDashboard() {
         <td style="font-size:0.75rem;color:var(--muted)">${awSP} vs ${hmSP}</td>
         <td><strong>${pickLabel}</strong></td>
         <td class="odds">${dkOdds}</td>
+        <td class="odds">${bestCell}</td>
         <td class="odds" style="color:var(--green)">${fairOdds}</td>
         <td class="pos">+${(openEdge * 100).toFixed(1)}%</td>
         <td class="pos">+${(liveEdge * 100).toFixed(1)}%</td>
-        <td>${luFlag}</td>
+        <td>${luFlag}${signalBadge}</td>
         <td>${(kelly * 100).toFixed(1)}%</td>
       </tr>`;
     }).join('');
@@ -430,7 +488,7 @@ async function loadDashboard() {
     const isBet = r.bet_side !== 0;
     const { pickLabel, ourP, mktP, edge } = formatPick(r);
     const isHome = r.bet_side === 1 || (r.bet_side === 0 && (r.edge_a || 0) > 0);
-    const statusTag = isBet ? '<span class="tag bet">BET</span>' : '<span class="tag shadow">tracking</span>';
+    const statusTag = isBet ? '<span class="tag bet">BET</span>' : '<span class="tag shadow" title="Model ran but edge below threshold — no bet fires">tracking</span>';
 
     // DK price (live, falling back to open)
     const dkPrice = isHome
@@ -463,6 +521,7 @@ async function loadDashboard() {
 
     const luFlag = r.has_lineup_data ? '<span class="flag ok">LU</span>' : '<span class="flag warn">no LU</span>';
     const edgeColor = openEdge > 0.02 ? 'var(--green)' : 'var(--muted)';
+    const bestCell = formatBestLine(r.dk_bet_price || dkPrice, r.best_bet_price, r.best_bet_book);
 
     return `<tr style="opacity:${isBet ? 1 : 0.6}">
       <td style="font-size:0.75rem;color:var(--muted)">${timeStr}</td>
@@ -470,6 +529,7 @@ async function loadDashboard() {
       <td style="font-size:0.75rem;color:var(--muted)">${awSP} vs ${hmSP}</td>
       <td><strong>${pickLabel}</strong></td>
       <td class="odds">${dkOdds}</td>
+      <td class="odds">${bestCell}</td>
       <td class="odds" style="color:var(--green)">${fairOdds}</td>
       <td style="color:${edgeColor}">${(openEdge * 100).toFixed(1)}%</td>
       <td style="color:${edgeColor}">${(liveEdge * 100).toFixed(1)}%</td>
@@ -574,10 +634,16 @@ async function loadDashboard() {
         const edge = Math.abs(p.edge_a || 0);
         const side = (p.edge_a || 0) > 0 ? 'OVER' : 'UNDER';
         const sideClass = side === 'OVER' ? 'over' : 'under';
-        const modelP = side === 'OVER' ? p.pred_a : (1 - p.pred_a);
-        const mktP = side === 'OVER' ? p.open_over_implied : (1 - (p.open_over_implied || 0.5));
+        // Always show OVER probabilities — Side column conveys bet direction.
+        // (Avoids confusing 27% "model" when betting UNDER on a 58% hit-rate prediction.)
+        const modelP = p.pred_a;
+        const mktP = p.open_over_implied || 0.5;
         const edgeColor = edge > 0.05 ? 'var(--green)' : 'var(--orange)';
-        const oppSP = spLookup[p.team] || '?';
+        const oppSP = (p.vs_sp_name || '').split(' ').pop() || spLookup[p.team] || '?';
+        // Kelly: use stored value (correlation-adjusted) or fallback to inline calc
+        const bKelly = p.kelly_fraction != null
+          ? p.kelly_fraction
+          : Math.max(0, (modelP * (1/Math.max(mktP,0.01) - 1) - (1 - modelP)) / (1/Math.max(mktP,0.01) - 1)) * 0.125;
         return `<tr>
           <td><strong>${p.pitcher_name}</strong></td>
           <td style="font-size:0.75rem;color:var(--muted)">vs ${oppSP}</td>
@@ -588,6 +654,7 @@ async function loadDashboard() {
           <td style="color:${edgeColor}">+${(edge * 100).toFixed(1)}%
             <span class="edge-bar" style="background:${edgeColor};width:${Math.min(edge * 800, 50)}px"></span></td>
           <td><span class="tag ${sideClass}">${side}</span></td>
+          <td style="color:var(--muted)">${(bKelly * 100).toFixed(1)}%</td>
         </tr>`;
       }).join('');
     }
@@ -666,24 +733,89 @@ async function loadDashboard() {
     }
   }
 
-  // === MARKET BREAKDOWN ===
-  const { data: allSettled } = await sb.from('predictions').select('market, bet_side, clv_pp, actual_home_win').not('settled_at', 'is', null).neq('bet_side', 0);
-  const marketBody = document.getElementById('market-body');
+  // === CROSS-MARKET SIGNALS ===
+  const { data: cmsData } = await sb.from('cross_market_signals')
+    .select('*').eq('game_date', today).in('conviction', ['high', 'medium'])
+    .order('conviction', { ascending: true }).order('game_id');
+  const cmsBody = document.getElementById('cms-body');
+  if (cmsData && cmsData.length > 0) {
+    document.getElementById('no-cms').style.display = 'none';
+    cmsBody.innerHTML = cmsData.map(s => {
+      const convColor = s.conviction === 'high' ? 'var(--green)' : 'var(--orange)';
+      const convBadge = `<span style="color:${convColor};font-weight:bold;text-transform:uppercase;font-size:0.72rem">${s.conviction}</span>`;
+      const pct = v => v != null ? (v * 100).toFixed(1) + '%' : '--';
+      const tot = v => v != null ? v.toFixed(2) : '--';
+      const edgeCell = (e, decimals=1) => {
+        if (e == null) return '<td>--</td>';
+        const cls = e > 0 ? 'pos' : 'neg';
+        return `<td class="${cls}">${(e * 100).toFixed(decimals)}pp</td>`;
+      };
+      const agreeIcons = [
+        s.cms_all_agree ? '✓✓✓' : (s.cms_ml_total_agree && s.cms_ml_rl_agree ? '✓✓' : (s.cms_ml_total_agree || s.cms_ml_rl_agree ? '✓' : '✗'))
+      ];
+      const agreeColor = s.cms_all_agree ? 'var(--green)' : (s.cms_ml_total_agree || s.cms_ml_rl_agree ? 'var(--orange)' : 'var(--muted)');
+      // game_id format: YYYYMMDD_AWAY_HOME
+      const gParts = (s.game_id || '').split('_');
+      const gameLabel = gParts.length >= 3
+        ? `${gParts[1]} @ ${gParts[2]} (${gParts[0].slice(4,6)}/${gParts[0].slice(6,8)})`
+        : (s.game_id || '--');
+      return `<tr>
+        <td style="font-size:0.75rem">${gameLabel}</td>
+        <td>${convBadge}</td>
+        <td>${pct(s.nb_fair_ml_home)}</td>
+        <td>${pct(s.mkt_ml_home)}</td>
+        ${edgeCell(s.edge_ml)}
+        <td>${tot(s.nb_fair_total)}</td>
+        <td>${tot(s.mkt_total_line)}</td>
+        ${edgeCell(s.edge_total)}
+        <td>${pct(s.nb_fair_rl_home)}</td>
+        <td>${pct(s.mkt_rl_home)}</td>
+        ${edgeCell(s.edge_rl)}
+        <td style="color:${agreeColor};font-size:0.75rem">${agreeIcons[0]} (${s.cms_n_markets || 0})</td>
+        <td style="font-size:0.72rem">${tot(s.nb_mu_home)}/${tot(s.nb_mu_away)}</td>
+      </tr>`;
+    }).join('');
+    makeSortable('cms-body');
+  } else {
+    document.getElementById('no-cms').style.display = 'block';
+  }
+
+  // === MARKET BREAKDOWN (cards, kelly>0 only) ===
+  const { data: allSettled } = await sb.from('predictions')
+    .select('market, model_tag, bet_side, clv_pp, actual_home_win, kelly_fraction')
+    .not('settled_at', 'is', null).gt('kelly_fraction', 0);
+  const mktCards = document.getElementById('mkt-cards');
   if (allSettled && allSettled.length > 0) {
     const byMarket = {};
+    const mktOrder = ['no_anchor_v2', 'v4_prod', 'total_full_v4', 'nrfi_v4', 'rl_f5_v4', 'team_total_away_v4', 'team_total_home_v4'];
+    const mktNames = {
+      'no_anchor_v2': 'ML Full', 'v4_prod': 'ML Full (legacy)',
+      'total_full_v4': 'Game Total', 'nrfi_v4': 'NRFI',
+      'rl_f5_v4': 'F5 RL', 'team_total_away_v4': 'Team Total (Away)', 'team_total_home_v4': 'Team Total (Home)',
+    };
     allSettled.forEach(r => {
-      if (!byMarket[r.market]) byMarket[r.market] = { bets: 0, clv: [], wins: 0 };
-      byMarket[r.market].bets++;
-      if (r.clv_pp != null) byMarket[r.market].clv.push(r.clv_pp);
-      if ((r.bet_side === 1 && r.actual_home_win === 1) || (r.bet_side === -1 && r.actual_home_win === 0)) byMarket[r.market].wins++;
+      const tag = r.model_tag || r.market;
+      if (!byMarket[tag]) byMarket[tag] = { bets: 0, clv: [], wins: 0 };
+      byMarket[tag].bets++;
+      if (r.clv_pp != null) byMarket[tag].clv.push(r.clv_pp);
+      if ((r.bet_side === 1 && r.actual_home_win === 1) || (r.bet_side === -1 && r.actual_home_win === 0)) byMarket[tag].wins++;
     });
-    marketBody.innerHTML = Object.entries(byMarket).map(([mkt, d]) => {
-      const avg = d.clv.length > 0 ? d.clv.reduce((a, b) => a + b, 0) / d.clv.length : null;
+    // Sort by CLV descending
+    const sorted = Object.entries(byMarket).sort((a, b) => {
+      const ca = a[1].clv.length ? a[1].clv.reduce((x,y)=>x+y)/a[1].clv.length : -99;
+      const cb = b[1].clv.length ? b[1].clv.reduce((x,y)=>x+y)/b[1].clv.length : -99;
+      return cb - ca;
+    });
+    mktCards.innerHTML = sorted.map(([tag, d]) => {
+      const avg = d.clv.length > 0 ? d.clv.reduce((a,b)=>a+b)/d.clv.length : null;
       const wr = d.bets > 0 ? d.wins / d.bets : null;
-      return `<tr>
-        <td>${mkt.replace(/_/g, ' ')}</td><td>${d.bets}</td>
-        <td class="${avg > 0 ? 'pos' : 'neg'}">${pp(avg)}</td>
-        <td>${wr != null ? (wr * 100).toFixed(0) + '%' : '--'}</td></tr>`;
+      const clvColor = avg == null ? 'var(--muted)' : avg > 0 ? 'var(--green)' : 'var(--red)';
+      const name = mktNames[tag] || tag.replace(/_v\d+$/, '').replace(/_/g, ' ');
+      return `<div class="mkt-card">
+        <div class="mkt-name">${name}</div>
+        <div class="mkt-clv" style="color:${clvColor}">${avg != null ? (avg > 0 ? '+' : '') + avg.toFixed(2) + 'pp' : '--'}</div>
+        <div class="mkt-detail">${d.bets} bets · ${wr != null ? (wr*100).toFixed(0)+'% win' : '--'}</div>
+      </div>`;
     }).join('');
   }
 
@@ -699,6 +831,16 @@ function timeAgo(d) {
   if (mins < 60) return `${mins}m ago`;
   if (mins < 1440) return `${Math.floor(mins / 60)}h ago`;
   return `${Math.floor(mins / 1440)}d ago`;
+}
+
+// Tab switching
+let activeTab = 'predictions';
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.tab-btn[onclick="switchTab('${name}')"]`).classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
+  activeTab = name;
 }
 
 // Initialize: default to today, highlight button
